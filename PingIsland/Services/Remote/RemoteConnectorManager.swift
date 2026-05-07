@@ -782,14 +782,26 @@ final class RemoteConnectorManager: ObservableObject {
                     relativePath: profile.configurationRelativePaths[0],
                     homeDirectory: probe.homeDirectory
                 )
-                let existingConfig = try? await RemoteSSHCommandRunner.readRemoteFile(
+                let configExists = try await RemoteSSHCommandRunner.remoteFileExists(
+                    target: endpoint.sshTarget,
+                    port: endpoint.sshPort,
+                    remotePath: remoteConfigPath,
+                    password: password
+                )
+                guard configExists else {
+                    logger.debug(
+                        "Remote uninstall skipped missing hook config endpoint=\(endpoint.id.uuidString, privacy: .public) profile=\(profile.id, privacy: .public) remotePath=\(remoteConfigPath, privacy: .public)"
+                    )
+                    continue
+                }
+                let existingConfig = try await RemoteSSHCommandRunner.readRemoteFile(
                     target: endpoint.sshTarget,
                     port: endpoint.sshPort,
                     remotePath: remoteConfigPath,
                     password: password
                 )
                 let updatedData = HookInstaller.updatedConfigurationData(
-                    existingData: existingConfig?.isEmpty == true ? nil : existingConfig,
+                    existingData: existingConfig.isEmpty ? nil : existingConfig,
                     profile: profile,
                     customCommand: "",
                     installing: false
@@ -822,14 +834,26 @@ final class RemoteConnectorManager: ObservableObject {
                         relativePath: activationPath,
                         homeDirectory: probe.homeDirectory
                     )
-                    let existingActivationConfig = try? await RemoteSSHCommandRunner.readRemoteFile(
+                    let activationConfigExists = try await RemoteSSHCommandRunner.remoteFileExists(
+                        target: endpoint.sshTarget,
+                        port: endpoint.sshPort,
+                        remotePath: remoteActivationPath,
+                        password: password
+                    )
+                    guard activationConfigExists else {
+                        logger.debug(
+                            "Remote uninstall skipped missing activation config endpoint=\(endpoint.id.uuidString, privacy: .public) profile=\(profile.id, privacy: .public) remotePath=\(remoteActivationPath, privacy: .public)"
+                        )
+                        continue
+                    }
+                    let existingActivationConfig = try await RemoteSSHCommandRunner.readRemoteFile(
                         target: endpoint.sshTarget,
                         port: endpoint.sshPort,
                         remotePath: remoteActivationPath,
                         password: password
                     )
                     let updatedActivationData = HookInstaller.updatedInternalHookConfigurationData(
-                        existingData: existingActivationConfig?.isEmpty == true ? nil : existingActivationConfig,
+                        existingData: existingActivationConfig.isEmpty ? nil : existingActivationConfig,
                         entryName: entryName,
                         installing: false
                     )
@@ -1768,10 +1792,29 @@ private enum RemoteSSHCommandRunner {
             port: port,
             password: password,
             remoteCommand: "cat \(shellQuote(remotePath))",
+            acceptNewHostKey: true
+        )
+        return Data(result.stdout.utf8)
+    }
+
+    static func remoteFileExists(target: String, port: Int, remotePath: String, password: String?) async throws -> Bool {
+        let result = try await runSSH(
+            target: target,
+            port: port,
+            password: password,
+            remoteCommand: "test -f \(shellQuote(remotePath))",
             acceptNewHostKey: true,
             allowFailure: true
         )
-        return Data(result.stdout.utf8)
+        if result.exitCode == 0 {
+            return true
+        }
+        if result.exitCode == 1 {
+            return false
+        }
+
+        let detail = result.stderr.isEmpty ? result.stdout : result.stderr
+        throw RemoteConnectorError.sshFailure(detail.isEmpty ? "SSH 执行失败" : detail)
     }
 
     static func writeRemoteFile(target: String, port: Int, remotePath: String, contents: Data, password: String?) async throws {
