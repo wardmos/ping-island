@@ -4,9 +4,11 @@ import XCTest
 @MainActor
 private final class AccessibilityStatusProbe {
     var isTrusted = false
+    var promptValues: [Bool] = []
 
-    func currentStatus() -> Bool {
-        isTrusted
+    func currentStatus(prompt: Bool) -> Bool {
+        promptValues.append(prompt)
+        return isTrusted
     }
 }
 
@@ -37,7 +39,8 @@ final class SettingsPanelViewModelTests: XCTestCase {
             let viewModel = SettingsPanelViewModel(
                 qoderCLIHookRefreshStatusProvider: { nil },
                 qoderCLIHookRefreshNoticeDefaults: defaults,
-                accessibilityStatusProvider: { probe.currentStatus() }
+                accessibilityStatusProvider: { probe.currentStatus(prompt: $0) },
+                accessibilitySettingsOpener: {}
             )
 
             viewModel.refreshAccessibilityStatus()
@@ -47,6 +50,48 @@ final class SettingsPanelViewModelTests: XCTestCase {
             viewModel.refreshAccessibilityStatus()
 
             XCTAssertTrue(viewModel.accessibilityEnabled)
+            XCTAssertEqual(probe.promptValues, [false, false])
+        }
+    }
+
+    func testOpenAccessibilitySettingsPromptsBeforeOpeningSystemSettings() async {
+        await MainActor.run {
+            let defaults = makeDefaults()
+            let probe = AccessibilityStatusProbe()
+            var openSettingsCount = 0
+            let viewModel = SettingsPanelViewModel(
+                qoderCLIHookRefreshStatusProvider: { nil },
+                qoderCLIHookRefreshNoticeDefaults: defaults,
+                accessibilityStatusProvider: { probe.currentStatus(prompt: $0) },
+                accessibilitySettingsOpener: { openSettingsCount += 1 }
+            )
+
+            viewModel.openAccessibilitySettings()
+
+            XCTAssertFalse(viewModel.accessibilityEnabled)
+            XCTAssertEqual(probe.promptValues, [true])
+            XCTAssertEqual(openSettingsCount, 1)
+        }
+    }
+
+    func testOpenAccessibilitySettingsDoesNotOpenSystemSettingsWhenPromptRefreshFindsAccess() async {
+        await MainActor.run {
+            let defaults = makeDefaults()
+            let probe = AccessibilityStatusProbe()
+            probe.isTrusted = true
+            var openSettingsCount = 0
+            let viewModel = SettingsPanelViewModel(
+                qoderCLIHookRefreshStatusProvider: { nil },
+                qoderCLIHookRefreshNoticeDefaults: defaults,
+                accessibilityStatusProvider: { probe.currentStatus(prompt: $0) },
+                accessibilitySettingsOpener: { openSettingsCount += 1 }
+            )
+
+            viewModel.openAccessibilitySettings()
+
+            XCTAssertTrue(viewModel.accessibilityEnabled)
+            XCTAssertEqual(probe.promptValues, [true])
+            XCTAssertEqual(openSettingsCount, 0)
         }
     }
 }

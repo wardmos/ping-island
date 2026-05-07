@@ -140,6 +140,16 @@ struct ClosedNotchUsageAvailability: Equatable {
     }
 }
 
+enum AccessibilityPermissionStatus {
+    static func isTrusted(prompt: Bool = false) -> Bool {
+        let options = [
+            kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: prompt
+        ] as CFDictionary
+
+        return AXIsProcessTrustedWithOptions(options)
+    }
+}
+
 @MainActor
 final class SettingsPanelViewModel: ObservableObject {
     struct HookReinstallFeedback: Equatable {
@@ -163,15 +173,22 @@ final class SettingsPanelViewModel: ObservableObject {
     private var hookFeedbackClearTasks: [String: Task<Void, Never>] = [:]
     private let qoderCLIHookRefreshStatusProvider: @MainActor () -> HookInstaller.QoderCLIHookRefreshStatus?
     private let qoderCLIHookRefreshNoticeGate: QoderCLIHookRefreshNoticeGate
-    private let accessibilityStatusProvider: @MainActor () -> Bool
+    private let accessibilityStatusProvider: @MainActor (_ prompt: Bool) -> Bool
+    private let accessibilitySettingsOpener: @MainActor () -> Void
 
     init(
         qoderCLIHookRefreshStatusProvider: @escaping @MainActor () -> HookInstaller.QoderCLIHookRefreshStatus? = {
             HookInstaller.qoderCLIHookRefreshStatus()
         },
         qoderCLIHookRefreshNoticeDefaults: UserDefaults = .standard,
-        accessibilityStatusProvider: @escaping @MainActor () -> Bool = {
-            AXIsProcessTrusted()
+        accessibilityStatusProvider: @escaping @MainActor (_ prompt: Bool) -> Bool = { prompt in
+            AccessibilityPermissionStatus.isTrusted(prompt: prompt)
+        },
+        accessibilitySettingsOpener: @escaping @MainActor () -> Void = {
+            guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") else {
+                return
+            }
+            NSWorkspace.shared.open(url)
         }
     ) {
         self.qoderCLIHookRefreshStatusProvider = qoderCLIHookRefreshStatusProvider
@@ -179,6 +196,7 @@ final class SettingsPanelViewModel: ObservableObject {
             defaults: qoderCLIHookRefreshNoticeDefaults
         )
         self.accessibilityStatusProvider = accessibilityStatusProvider
+        self.accessibilitySettingsOpener = accessibilitySettingsOpener
     }
 
     var visibleHookProfiles: [ManagedHookClientProfile] {
@@ -220,7 +238,7 @@ final class SettingsPanelViewModel: ObservableObject {
     }
 
     func refreshAccessibilityStatus() {
-        accessibilityEnabled = accessibilityStatusProvider()
+        accessibilityEnabled = accessibilityStatusProvider(false)
     }
 
     func refreshLocalizedState() {
@@ -434,11 +452,10 @@ final class SettingsPanelViewModel: ObservableObject {
     }
 
     func openAccessibilitySettings() {
-        guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") else {
-            return
+        accessibilityEnabled = accessibilityStatusProvider(true)
+        if !accessibilityEnabled {
+            accessibilitySettingsOpener()
         }
-        refreshAccessibilityStatus()
-        NSWorkspace.shared.open(url)
     }
 
     func exportLogs() {
