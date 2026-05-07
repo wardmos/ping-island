@@ -378,6 +378,7 @@
 "密码模式" = "Password Mode";
 "添加远程主机后，Island 会通过 SSH 检查环境、安装远程 bridge，并配置 Hooks。" = "After you add a remote host, Island uses SSH to check the environment, install the remote bridge, and configure hooks.";
 "连接成功后，远程会话会回传到本机显示；如果密码连接失败，需要重新输入密码。" = "Once connected, remote sessions are forwarded back to your Mac for display. If password auth fails, you will need to enter the password again.";
+"如果不再需要远端集成，可在这里直接卸载 bridge；这会删除远端 `~/.ping-island` 并撤回 Island 托管的 hooks。" = "If you no longer need remote integrations, you can uninstall the bridge here. This removes remote `~/.ping-island` and withdraws Island-managed hooks.";
 "连接成功后可直接重连；连接失败后需要重新输入" = "Reconnect directly after a successful connection; re-enter the password after a failed reconnect";
 "SSH" = "SSH";
 "检测 + 安装 bridge + 改写 hooks" = "Probe + install bridge + rewrite hooks";
