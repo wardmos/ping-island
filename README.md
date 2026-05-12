@@ -96,7 +96,7 @@ Ping Island focuses on the moments that actually interrupt coding flow, then kee
 - **Buddy detach in v0.5.0+** - Drag the active Buddy out of the notch so it can stay nearby as an independent floating companion.
 - **Hermes courier-fox mascot** - Hermes Agent uses a gold courier fox with a winged helmet and satchel so plugin-hook sessions stay visually distinct from the Claude/Qwen family.
 - **Qwen capybara mascot** - Qwen Code now ships with a mint-scarf capybara mascot tuned for prompt, reply, and notification-heavy flows.
-- **Kimi moon-rabbit mascot** - Kimi CLI ships with a moonlit rabbit mascot and rose-red accents so its hook sessions stand apart from the other hook-driven clients.
+- **Kimi keyboard-orb mascot** - Kimi CLI keeps its original blue keyboard-orb mascot so its hook sessions stay visually distinct in the README strip and app UI.
 
 <a id="supported-tools"></a>
 ## Supported Tools
@@ -115,7 +115,7 @@ Hermes Agent is integrated through a generated plugin directory at `~/.hermes/pl
 
 Qwen Code is supported as a first-class hook client through `~/.qwen/settings.json`, and its built-in mascot is the mint-scarf capybara shown in the README GIF strip. The visual is meant to feel calm and dependable, while still carrying a small Qwen-tinted scarf and reply bubble instead of another generic bird or blob.
 
-Kimi CLI is supported through its official hooks in `~/.kimi/config.toml`. Ping Island installs managed `[[hooks]]` entries while preserving unrelated TOML configuration, treats Kimi `Stop` as an assistant-turn completion rather than a closed session, and waits for `SessionEnd` before marking the session ended. Its built-in mascot is the moon-rabbit GIF shown above.
+Kimi CLI is supported through its official hooks in `~/.kimi/config.toml`. Ping Island installs managed `[[hooks]]` entries while preserving unrelated TOML configuration, treats Kimi `Stop` as an assistant-turn completion rather than a closed session, and waits for `SessionEnd` before marking the session ended. Its built-in mascot is the original blue keyboard-orb GIF shown above.
 
 OpenClaw is supported through a managed internal hook directory under `~/.openclaw/hooks/` plus transcript-aware session refresh from `~/.openclaw/agents/main/sessions/`. That combination lets Ping Island surface OpenClaw's lightweight message hooks quickly, then backfill the full conversation from the local session log once the assistant reply lands.
 
