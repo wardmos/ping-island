@@ -373,6 +373,23 @@ actor SessionStore {
         let sessionId = event.provider == .codex
             ? resolveOrAdoptCodexHookSession(event)
             : event.sessionId
+
+        // When Codex fires a PermissionRequest hook with permission_mode=bypassPermissions,
+        // Codex has already auto-approved the tool call internally (approval_mode "never").
+        // No UI card is needed — respond to the hook immediately so the hook client is
+        // never left waiting on a 24-hour timeout.
+        //
+        // All other PermissionRequest hooks (permission_mode=default etc.) represent
+        // genuine approval requests where Codex is waiting for Island's response.
+        // Fall through to show an approval card.
+        if event.codexBypassPermissions {
+            Self.logger.notice(
+                "Suppressing bypassPermissions hook session=\(sessionId.prefix(8), privacy: .public)"
+            )
+            HookSocketServer.shared.respondToPermissionBySession(sessionId: sessionId, decision: "approve")
+            return
+        }
+
         if shouldIgnoreClaudeAskUserQuestionPermissionRequest(event) {
             Self.logger.notice(
                 "Ignoring duplicate Claude AskUserQuestion permission session=\(sessionId, privacy: .public)"

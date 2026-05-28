@@ -49,6 +49,7 @@ actor CodexAppServerMonitor {
     private var requestSequence = 0
     private var pendingResponses: [String: CheckedContinuation<[String: Any], Error>] = [:]
     private var pendingRequestsByThread: [String: PendingRequest] = [:]
+    private var threadApprovalModes: [String: String] = [:]  // threadId → approvalMode
     private var resolvedClientBundleIdentifier: String?
     private var resolvedClientName: String?
     private var lastThreadDiagnostics: [ThreadDiagnosticsSnapshot] = []
@@ -108,6 +109,7 @@ actor CodexAppServerMonitor {
         process?.terminate()
         process = nil
         pendingRequestsByThread.removeAll()
+        threadApprovalModes.removeAll()
         lastThreadDiagnostics.removeAll()
 
         for (_, continuation) in pendingResponses {
@@ -503,7 +505,7 @@ actor CodexAppServerMonitor {
         }
 
         if let method = json["method"] as? String {
-            if let idValue = json["id"] {
+            if let idValue = json["id"], !(idValue is NSNull) {
                 await handleServerRequest(
                     id: stringify(idValue),
                     method: method,
@@ -617,6 +619,49 @@ actor CodexAppServerMonitor {
         }
     }
 
+    // MARK: - Codex approval-policy helpers
+
+    /// Returns `true` if the thread's approval policy is "never", meaning
+    /// Codex auto-approves WebSocket approval requests without waiting for our response.
+    ///
+    /// Used for the WebSocket path (`item/*/requestApproval`).  The hook-based path
+    /// uses `codexBypassPermissions` on the `HookEvent` instead, which is populated
+    /// directly from `permission_mode=bypassPermissions` in the hook payload.
+    ///
+    /// Lookup order:
+    /// 1. In-memory cache populated from WebSocket thread list / thread/read responses.
+    /// 2. `~/.codex/.codex-global-state.json` — per-thread heartbeat entry only.
+    private func isAutoApproveThread(_ threadId: String) -> Bool {
+        if let cached = threadApprovalModes[threadId] {
+            return cached == "never"
+        }
+        return Self.approvalPolicyFromGlobalState(threadId: threadId) == "never"
+    }
+
+    nonisolated static func approvalPolicyFromGlobalState(threadId: String) -> String? {
+        guard
+            let data = try? Data(contentsOf: URL(
+                fileURLWithPath: NSHomeDirectory()
+                    .appending("/.codex/.codex-global-state.json")
+            )),
+            let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+            let atomState = root["electron-persisted-atom-state"] as? [String: Any]
+        else {
+            return nil
+        }
+
+        // Check per-thread heartbeat permissions (most authoritative for Desktop threads).
+        // CLI-only sessions (e.g. agentloop) are not present here; their approval policy
+        // is signalled by permission_mode=bypassPermissions in the hook payload instead.
+        if let permsMap = atomState["heartbeat-thread-permissions-by-id"] as? [String: Any],
+           let entry = permsMap[threadId] as? [String: Any],
+           let policy = entry["approvalPolicy"] as? String {
+            return policy
+        }
+
+        return nil
+    }
+
     private func handleServerRequest(id: String, method: String, params: [String: Any]) async {
         switch method {
         case "item/commandExecution/requestApproval":
@@ -624,6 +669,12 @@ actor CodexAppServerMonitor {
             guard !threadId.isEmpty else { return }
 
             let command = ((params["command"] as? [String]) ?? []).joined(separator: " ")
+
+            if isAutoApproveThread(threadId) {
+                await sendResponse(id: id, result: ["decision": "accept"])
+                return
+            }
+
             let cwd = params["cwd"] as? String
             let reason = params["reason"] as? String
             let intervention = SessionIntervention(
@@ -666,6 +717,12 @@ actor CodexAppServerMonitor {
             guard let threadId = params["threadId"] as? String else { return }
             let reason = params["reason"] as? String
             let grantRoot = params["grantRoot"] as? String
+
+            if isAutoApproveThread(threadId) {
+                await sendResponse(id: id, result: ["decision": "accept"])
+                return
+            }
+
             let intervention = SessionIntervention(
                 id: id,
                 kind: .approval,
@@ -706,6 +763,15 @@ actor CodexAppServerMonitor {
             let permissions = params["permissions"] as? [String: Any] ?? [:]
             let reason = params["reason"] as? String
             let message = reason ?? permissionSummary(permissions)
+
+            if isAutoApproveThread(threadId) {
+                await sendResponse(id: id, result: [
+                    "permissions": permissions,
+                    "scope": "session"
+                ])
+                return
+            }
+
             let intervention = SessionIntervention(
                 id: id,
                 kind: .approval,
@@ -850,6 +916,12 @@ actor CodexAppServerMonitor {
 
     private func ingestThread(_ thread: [String: Any]) async {
         guard let threadId = thread["id"] as? String else { return }
+        // Cache approvalMode from app-server data so approval-policy checks
+        // don't have to re-read the global state file on every request.
+        let rawMode = thread["approvalMode"] as? String ?? thread["approval_mode"] as? String
+        if let mode = rawMode {
+            threadApprovalModes[threadId] = mode
+        }
         let name = thread["name"] as? String
         let preview = thread["preview"] as? String
         let cwd = thread["cwd"] as? String
@@ -950,6 +1022,13 @@ actor CodexAppServerMonitor {
 
     private func parseThreadSnapshot(_ thread: [String: Any]) -> CodexThreadSnapshot? {
         guard let threadId = thread["id"] as? String else { return nil }
+
+        // Keep the approval-mode cache fresh: thread/read and thread/list both
+        // call this path, so any policy change made in Codex Desktop will be
+        // reflected within the next polling cycle (≤ 30 s).
+        if let mode = thread["approvalMode"] as? String ?? thread["approval_mode"] as? String {
+            threadApprovalModes[threadId] = mode
+        }
 
         let createdAt = date(fromUnixTimestamp: thread["createdAt"]) ?? Date()
         let updatedAt = date(fromUnixTimestamp: thread["updatedAt"]) ?? createdAt
@@ -1536,4 +1615,6 @@ actor CodexAppServerMonitor {
         return bundle.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String
             ?? bundle.object(forInfoDictionaryKey: "CFBundleName") as? String
     }
+
 }
+
