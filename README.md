@@ -167,25 +167,6 @@ Ping Island focuses on the moments that actually interrupt coding flow, then kee
 | CodeBuddy / WorkBuddy | Managed hook profiles plus optional VS Code-compatible focus extension | App windows, terminal, and supported IDE extension paths | Claude-family session tracking, client-aware jump-back, follow-up visibility |
 | GitHub Copilot | Copilot hook protocol | Compatible terminal hosts | Copilot CLI / agent hook event status |
 
-Ping Island also ships VS Code-compatible focus extensions for VS Code, Cursor, CodeBuddy, WorkBuddy, and Qoder. `QoderWork` is hook-only today and does not participate in the IDE extension path.
-
-Qoder IDE and Qoder CLI both store hooks in `~/.qoder/settings.json`, but Ping Island treats them as separate managed integrations because their hook behavior is not identical. On launch, Ping Island checks `qodercli -v`; when the local CLI is newer than 0.2.5, it refreshes only the Qoder CLI managed entries while preserving Qoder IDE hooks and unrelated JSON settings. New Qoder CLI follows Claude Code-compatible blocking hooks and response payloads, while Qoder IDE and `QoderWork` stay notify-only so Ping Island does not submit answers or approvals back into those clients.
-
-CodeBuddy IDE and CodeBuddy CLI both use `~/.codebuddy/settings.json`, but Ping Island manages them as separate hook profiles. The CodeBuddy CLI profile writes its own `codebuddy-cli` hooks, uses the CLI's Claude-compatible hook response shape, and preserves CodeBuddy IDE hooks plus unrelated settings in the same file.
-
-Hermes Agent is integrated through a generated plugin directory at `~/.hermes/plugins/ping_island/`. Hermes' gateway hook directories under `~/.hermes/hooks/` do not run in the CLI, so Ping Island uses the official `ctx.register_hook()` plugin surface to observe prompt submission, tool activity, model replies, and session end events.
-
-Qwen Code is supported as a first-class hook client through `~/.qwen/settings.json`, and its built-in mascot is the mint-scarf capybara shown in the README GIF strip. The visual is meant to feel calm and dependable, while still carrying a small Qwen-tinted scarf and reply bubble instead of another generic bird or blob.
-
-Kimi CLI is supported through its official hooks in `~/.kimi/config.toml`. Ping Island installs managed `[[hooks]]` entries while preserving unrelated TOML configuration, treats Kimi `Stop` as an assistant-turn completion rather than a closed session, and waits for `SessionEnd` before marking the session ended. Its built-in mascot is the original blue keyboard-orb GIF shown above.
-
-OpenClaw is supported through a managed internal hook directory under `~/.openclaw/hooks/` plus transcript-aware session refresh from `~/.openclaw/agents/main/sessions/`. That combination lets Ping Island surface OpenClaw's lightweight message hooks quickly, then backfill the full conversation from the local session log once the assistant reply lands.
-
-SSH support is a core workflow, not a sidecar script. Ping Island can bootstrap a bridge onto a remote macOS or Linux host, rewrite remote Claude-compatible and Qwen Code hook configs to use that bridge, install supported OpenClaw internal hooks on the remote host, forward recent remote Codex app-server thread activity, and keep a bidirectional forwarding path back into the local menu-bar UI. That means approvals, follow-up questions, notifications, Codex progress, and jump-back routing from remote SSH terminals still land in the same Island surface on your Mac.
-
-The mascot GIFs used throughout this README are generated from the live `MascotView` implementation via `./scripts/render-mascots.sh`.
-The OpenClaw feature poster in `docs/images/ping-island-openclaw-poster.png` is generated via `./scripts/render-openclaw-poster.sh`.
-
 ## Testing
 
 The fastest full-repo regression path is:
