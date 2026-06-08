@@ -85,7 +85,7 @@ struct NotchView: View {
     /// Whether any session requires a user decision right now.
     private var hasManualAttentionIndicator: Bool {
         sessionMonitor.instances.contains {
-            $0.needsApprovalResponse || $0.intervention != nil
+            $0.needsPromptNotification
         }
     }
 
@@ -411,7 +411,7 @@ struct NotchView: View {
             }
             .onReceive(sessionMonitor.$instances) { instances in
                 viewModel.setManualAttentionActive(
-                    instances.contains { $0.needsApprovalResponse || $0.intervention != nil }
+                    instances.contains { $0.needsPromptNotification }
                 )
                 handleProcessingChange()
                 handleSessionSoundTransitions(instances)
@@ -1071,7 +1071,7 @@ struct NotchView: View {
             return
         }
 
-        if targetSession.needsApprovalResponse || targetSession.needsQuestionResponse {
+        if targetSession.needsPromptNotification {
             viewModel.presentNotificationAttention()
             return
         }

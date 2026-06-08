@@ -1347,7 +1347,11 @@ struct InstanceRow: View {
 
     @ViewBuilder
     private var trailingActions: some View {
-        if session.needsQuestionResponse {
+        if session.shouldSuppressInAppPromptControls(
+            routePromptsToTerminal: settings.effectiveRoutePromptsToTerminal
+        ) {
+            EmptyView()
+        } else if session.needsQuestionResponse {
             HStack(spacing: 6) {
                 IconButton(icon: "bubble.left") {
                     onChat()

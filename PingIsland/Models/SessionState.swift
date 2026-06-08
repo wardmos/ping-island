@@ -51,6 +51,7 @@ struct SessionState: Equatable, Identifiable, Sendable {
     var sessionName: String?
     var previewText: String?
     var latestHookMessage: String?
+    var suppressInAppPromptControls: Bool
     var intervention: SessionIntervention?
     var pendingInterventions: [SessionIntervention]
     var codexParentThreadId: String?
@@ -123,6 +124,7 @@ struct SessionState: Equatable, Identifiable, Sendable {
         sessionName: String? = nil,
         previewText: String? = nil,
         latestHookMessage: String? = nil,
+        suppressInAppPromptControls: Bool = false,
         intervention: SessionIntervention? = nil,
         pendingInterventions: [SessionIntervention] = [],
         codexParentThreadId: String? = nil,
@@ -158,6 +160,7 @@ struct SessionState: Equatable, Identifiable, Sendable {
         self.sessionName = sessionName
         self.previewText = previewText
         self.latestHookMessage = latestHookMessage
+        self.suppressInAppPromptControls = suppressInAppPromptControls
         self.intervention = intervention
         self.pendingInterventions = pendingInterventions
         self.codexParentThreadId = codexParentThreadId
@@ -192,6 +195,12 @@ struct SessionState: Equatable, Identifiable, Sendable {
     /// Whether this session should be surfaced before active/background work.
     nonisolated var needsManualAttention: Bool {
         needsAttention
+    }
+
+    /// Whether this session should surface an attention notification for a prompt
+    /// even when the prompt response itself must stay in the terminal/client.
+    nonisolated var needsPromptNotification: Bool {
+        needsApprovalResponse || needsQuestionResponse || suppressInAppPromptControls
     }
 
     /// The active permission context, if any
@@ -941,6 +950,13 @@ struct SessionState: Equatable, Identifiable, Sendable {
     /// Whether the session is waiting on an approval-like decision.
     nonisolated var needsApprovalResponse: Bool {
         phase.isWaitingForApproval || intervention?.kind == .approval
+    }
+
+    /// Whether Island should hide prompt response controls and behave as a
+    /// notification-only surface for the current prompt.
+    nonisolated func shouldSuppressInAppPromptControls(routePromptsToTerminal: Bool) -> Bool {
+        (routePromptsToTerminal || suppressInAppPromptControls)
+            && (needsApprovalResponse || needsQuestionResponse)
     }
 
     /// CodeBuddy/WorkBuddy can show follow-up questions in the client UI without

@@ -14,6 +14,7 @@ struct ChatView: View {
     let initialSession: SessionState
     let sessionMonitor: SessionMonitor
     @ObservedObject var viewModel: NotchViewModel
+    @ObservedObject private var settings = AppSettings.shared
 
     @State private var inputText: String = ""
     @State private var history: [ChatHistoryItem] = []
@@ -77,6 +78,12 @@ struct ChatView: View {
             .replacingOccurrences(of: "-", with: "")
         let isRelevantStatus = latestTool.status == .success || latestTool.status == .running
         return normalizedName == "askfollowupquestion" && isRelevantStatus
+    }
+
+    private var shouldSuppressPromptControls: Bool {
+        session.shouldSuppressInAppPromptControls(
+            routePromptsToTerminal: settings.effectiveRoutePromptsToTerminal
+        )
     }
 
     /// When an external client like Qoder is waiting for input, top-align sparse
@@ -442,6 +449,7 @@ struct ChatView: View {
             tool: tool,
             toolInput: session.pendingToolInput,
             sessionAction: session.scopedApprovalAction,
+            suppressControls: shouldSuppressPromptControls,
             onApprove: { approvePermission() },
             onApproveForSession: { approvePermissionForSession() },
             onDeny: { denyPermission() }
@@ -518,7 +526,9 @@ struct ChatView: View {
                 Spacer(minLength: 0)
             }
 
-            if intervention.awaitsExternalContinuation,
+            if shouldSuppressPromptControls {
+                terminalRoutedPromptNotice
+            } else if intervention.awaitsExternalContinuation,
                session.clientInfo.prefersAnsweredQuestionFollowupAction {
                 VStack(alignment: .leading, spacing: 10) {
                     SessionQuestionForm(
@@ -645,6 +655,17 @@ struct ChatView: View {
             .allowsHitTesting(false)
         }
         .zIndex(1)
+    }
+
+    private var terminalRoutedPromptNotice: some View {
+        Text(verbatim: AppLocalization.format(
+            "已保留在%@中处理。Ping Island 只提醒，不接管此处响应。",
+            session.isInTmux ? AppLocalization.string("终端") : session.interactionDisplayName
+        ))
+        .font(.system(size: 11, weight: .medium))
+        .foregroundColor(.white.opacity(0.62))
+        .fixedSize(horizontal: false, vertical: true)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     // MARK: - Autoscroll Management
@@ -1518,6 +1539,7 @@ struct ChatApprovalBar: View {
     let tool: String
     let toolInput: String?
     let sessionAction: SessionScopedApprovalAction?
+    var suppressControls = false
     let onApprove: () -> Void
     let onApproveForSession: () -> Void
     let onDeny: () -> Void
@@ -1546,54 +1568,60 @@ struct ChatApprovalBar: View {
 
             Spacer()
 
-            // Deny button
-            Button {
-                onDeny()
-            } label: {
-                Text(AppLocalization.string("Deny"))
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundColor(.white.opacity(0.7))
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
-                    .background(Color.white.opacity(0.1))
-                    .clipShape(Capsule())
-            }
-            .buttonStyle(.plain)
-            .opacity(showDenyButton ? 1 : 0)
-            .scaleEffect(showDenyButton ? 1 : 0.8)
-
-            if let sessionAction {
+            if suppressControls {
+                Text(appLocalized: "已保留在终端中处理")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(.white.opacity(0.62))
+            } else {
+                // Deny button
                 Button {
-                    onApproveForSession()
+                    onDeny()
                 } label: {
-                    Text(AppLocalization.string(sessionAction.buttonTitleKey))
+                    Text(AppLocalization.string("Deny"))
                         .font(.system(size: 13, weight: .medium))
-                        .foregroundColor(.white.opacity(0.92))
+                        .foregroundColor(.white.opacity(0.7))
                         .padding(.horizontal, 16)
                         .padding(.vertical, 8)
-                        .background(TerminalColors.blue.opacity(0.26))
+                        .background(Color.white.opacity(0.1))
                         .clipShape(Capsule())
                 }
                 .buttonStyle(.plain)
-                .opacity(showSessionButton ? 1 : 0)
-                .scaleEffect(showSessionButton ? 1 : 0.8)
-            }
+                .opacity(showDenyButton ? 1 : 0)
+                .scaleEffect(showDenyButton ? 1 : 0.8)
 
-            // Allow button
-            Button {
-                onApprove()
-            } label: {
-                Text(AppLocalization.string("Allow"))
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundColor(.black)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
-                    .background(Color.white.opacity(0.95))
-                    .clipShape(Capsule())
+                if let sessionAction {
+                    Button {
+                        onApproveForSession()
+                    } label: {
+                        Text(AppLocalization.string(sessionAction.buttonTitleKey))
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundColor(.white.opacity(0.92))
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 8)
+                            .background(TerminalColors.blue.opacity(0.26))
+                            .clipShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .opacity(showSessionButton ? 1 : 0)
+                    .scaleEffect(showSessionButton ? 1 : 0.8)
+                }
+
+                // Allow button
+                Button {
+                    onApprove()
+                } label: {
+                    Text(AppLocalization.string("Allow"))
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(.black)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                        .background(Color.white.opacity(0.95))
+                        .clipShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                .opacity(showAllowButton ? 1 : 0)
+                .scaleEffect(showAllowButton ? 1 : 0.8)
             }
-            .buttonStyle(.plain)
-            .opacity(showAllowButton ? 1 : 0)
-            .scaleEffect(showAllowButton ? 1 : 0.8)
         }
         .frame(minHeight: 44)  // Consistent height with other bars
         .padding(.horizontal, 16)
@@ -1604,13 +1632,13 @@ struct ChatApprovalBar: View {
                 showContent = true
             }
             withAnimation(.spring(response: 0.35, dampingFraction: 0.7).delay(0.1)) {
-                showDenyButton = true
+                showDenyButton = !suppressControls
             }
             withAnimation(.spring(response: 0.35, dampingFraction: 0.7).delay(0.15)) {
-                showSessionButton = sessionAction != nil
+                showSessionButton = !suppressControls && sessionAction != nil
             }
             withAnimation(.spring(response: 0.35, dampingFraction: 0.7).delay(0.2)) {
-                showAllowButton = true
+                showAllowButton = !suppressControls
             }
         }
     }

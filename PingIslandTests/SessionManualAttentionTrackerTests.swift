@@ -2,6 +2,22 @@ import XCTest
 @testable import Ping_Island
 
 final class SessionManualAttentionTrackerTests: XCTestCase {
+    func testTerminalRoutedPromptTriggersAttentionNotification() {
+        var tracker = SessionManualAttentionTracker()
+        let session = SessionState(
+            sessionId: "terminal-routed-question",
+            cwd: "/tmp/project",
+            suppressInAppPromptControls: true,
+            phase: .waitingForInput
+        )
+
+        XCTAssertEqual(
+            tracker.consumeNewAttentionSession(from: [session])?.stableId,
+            session.stableId
+        )
+        XCTAssertNil(tracker.consumeNewAttentionSession(from: [session]))
+    }
+
     func testApprovalToolUseRefreshInSameSessionTriggersAttentionAgain() {
         var tracker = SessionManualAttentionTracker()
         let firstApproval = makeApprovalSession(toolUseId: "tool-1")

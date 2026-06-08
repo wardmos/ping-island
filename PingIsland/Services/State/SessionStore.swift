@@ -642,6 +642,15 @@ actor SessionStore {
             clearCurrentIntervention(in: &session, nextPhase: session.phase)
         }
 
+        if event.suppressInAppPrompt {
+            session.suppressInAppPromptControls =
+                session.needsApprovalResponse || session.phase == .waitingForInput || session.intervention != nil
+        } else if !session.needsApprovalResponse, case .none = session.intervention {
+            session.suppressInAppPromptControls = false
+        } else if event.expectsResponse || hasIncomingIntervention {
+            session.suppressInAppPromptControls = false
+        }
+
         if event.event == "PermissionRequest", let toolUseId = event.toolUseId {
             Self.logger.debug("Setting tool \(toolUseId.prefix(12), privacy: .public) status to waitingForApproval")
             updateToolStatus(in: &session, toolId: toolUseId, status: .waitingForApproval)
@@ -4293,6 +4302,7 @@ actor SessionStore {
             sessionName: previousSession.sessionName,
             previewText: previousSession.previewText,
             latestHookMessage: previousSession.latestHookMessage,
+            suppressInAppPromptControls: previousSession.suppressInAppPromptControls,
             intervention: previousSession.intervention,
             pendingInterventions: previousSession.pendingInterventions,
             codexParentThreadId: previousSession.codexParentThreadId,

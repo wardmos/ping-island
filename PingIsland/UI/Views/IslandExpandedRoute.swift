@@ -88,7 +88,7 @@ enum IslandExpandedRouteResolver {
 
     nonisolated static func highestPriorityAttentionSession(from sessions: [SessionState]) -> SessionState? {
         orderedSessions(from: sessions)
-            .filter { $0.needsApprovalResponse || $0.needsQuestionResponse }
+            .filter(\.needsPromptNotification)
             .sorted(by: attentionSort)
             .first
     }

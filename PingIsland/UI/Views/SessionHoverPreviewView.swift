@@ -100,6 +100,7 @@ struct SessionHoverDashboardView: View {
     let sessions: [SessionState]
     let sessionMonitor: SessionMonitor
     var density: HoverPreviewDensity = .regular
+    var suppressInAppPromptControls = false
     var onQuestionInteractionStateChanged: (Bool) -> Void = { _ in }
 
     private var displayedSessions: [SessionState] {
@@ -114,14 +115,15 @@ struct SessionHoverDashboardView: View {
                 }
 
                 ForEach(displayedSessions) { session in
-                    let isHighlighted = session.needsApprovalResponse
-                    if session.needsApprovalResponse || session.intervention?.kind == .question {
+                    let isHighlighted = session.needsPromptNotification
+                    if session.needsPromptNotification {
                         HoverSessionCard(
                             session: session,
                             sessionMonitor: sessionMonitor,
                             opensOnTap: false,
                             isHighlighted: isHighlighted,
                             density: density,
+                            suppressInAppPromptControls: suppressInAppPromptControls,
                             onQuestionInteractionStateChanged: onQuestionInteractionStateChanged
                         )
                     } else {
@@ -158,6 +160,7 @@ struct SessionAttentionNotificationView: View {
     let session: SessionState
     let sessionMonitor: SessionMonitor
     var density: HoverPreviewDensity = .regular
+    var suppressInAppPromptControls = false
     var onHoverChanged: (Bool) -> Void = { _ in }
     var onQuestionInteractionStateChanged: (Bool) -> Void = { _ in }
     var onActionCompleted: () -> Void = {}
@@ -169,8 +172,9 @@ struct SessionAttentionNotificationView: View {
                     session: session,
                     sessionMonitor: sessionMonitor,
                     opensOnTap: false,
-                    isHighlighted: session.needsApprovalResponse,
+                    isHighlighted: session.needsPromptNotification,
                     density: density,
+                    suppressInAppPromptControls: suppressInAppPromptControls,
                     onQuestionInteractionStateChanged: onQuestionInteractionStateChanged,
                     onActionCompleted: onActionCompleted
                 )
@@ -309,12 +313,19 @@ struct HoverSessionCard: View {
     var opensOnTap: Bool = true
     var isHighlighted = false
     var density: HoverPreviewDensity = .regular
+    var suppressInAppPromptControls = false
     var onQuestionInteractionStateChanged: (Bool) -> Void = { _ in }
     var onActionCompleted: () -> Void = {}
     @State private var isHovered = false
 
     private var snapshot: HoverConversationSnapshot {
         HoverConversationSnapshotBuilder.snapshot(for: session)
+    }
+
+    private var shouldSuppressPromptControls: Bool {
+        session.shouldSuppressInAppPromptControls(
+            routePromptsToTerminal: suppressInAppPromptControls
+        )
     }
 
     var body: some View {
@@ -325,6 +336,7 @@ struct HoverSessionCard: View {
                 HoverApprovalCard(
                     session: session,
                     sessionMonitor: sessionMonitor,
+                    suppressControls: shouldSuppressPromptControls,
                     onActionCompleted: onActionCompleted
                 )
             } else if let intervention = session.intervention, intervention.kind == .question {
@@ -334,9 +346,14 @@ struct HoverSessionCard: View {
                     session: session,
                     intervention: intervention,
                     sessionMonitor: sessionMonitor,
+                    suppressControls: shouldSuppressPromptControls,
                     onQuestionInteractionStateChanged: onQuestionInteractionStateChanged,
                     onActionCompleted: onActionCompleted
                 )
+            } else if session.suppressInAppPromptControls {
+                HoverSessionHeader(session: session)
+
+                HoverTerminalRoutedPromptNotice(session: session)
             } else {
                 HoverSessionHeader(session: session)
 
@@ -436,6 +453,7 @@ private struct HoverConversationCard: View {
 private struct HoverApprovalCard: View {
     let session: SessionState
     let sessionMonitor: SessionMonitor
+    var suppressControls = false
     let onActionCompleted: () -> Void
 
     private var providerLabel: String {
@@ -478,31 +496,35 @@ private struct HoverApprovalCard: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
 
-            HStack(spacing: 8) {
-                Button(AppLocalization.string("Deny")) {
-                    sessionMonitor.denyPermission(sessionId: session.sessionId, reason: nil)
-                    onActionCompleted()
-                }
-                .buttonStyle(HoverApprovalButtonStyle(background: Color.white.opacity(0.1)))
-
-                if let sessionAction = session.scopedApprovalAction {
-                    Button(AppLocalization.string(sessionAction.buttonTitleKey)) {
-                        sessionMonitor.approvePermission(sessionId: session.sessionId, forSession: true)
+            if suppressControls {
+                HoverTerminalRoutedPromptNotice(session: session)
+            } else {
+                HStack(spacing: 8) {
+                    Button(AppLocalization.string("Deny")) {
+                        sessionMonitor.denyPermission(sessionId: session.sessionId, reason: nil)
                         onActionCompleted()
                     }
-                    .buttonStyle(
-                        HoverApprovalButtonStyle(
-                            background: TerminalColors.blue.opacity(0.26),
-                            foreground: .white.opacity(0.95)
-                        )
-                    )
-                }
+                    .buttonStyle(HoverApprovalButtonStyle(background: Color.white.opacity(0.1)))
 
-                Button(AppLocalization.string("Allow")) {
-                    sessionMonitor.approvePermission(sessionId: session.sessionId)
-                    onActionCompleted()
+                    if let sessionAction = session.scopedApprovalAction {
+                        Button(AppLocalization.string(sessionAction.buttonTitleKey)) {
+                            sessionMonitor.approvePermission(sessionId: session.sessionId, forSession: true)
+                            onActionCompleted()
+                        }
+                        .buttonStyle(
+                            HoverApprovalButtonStyle(
+                                background: TerminalColors.blue.opacity(0.26),
+                                foreground: .white.opacity(0.95)
+                            )
+                        )
+                    }
+
+                    Button(AppLocalization.string("Allow")) {
+                        sessionMonitor.approvePermission(sessionId: session.sessionId)
+                        onActionCompleted()
+                    }
+                    .buttonStyle(HoverApprovalButtonStyle(background: Color.white.opacity(0.92), foreground: .black))
                 }
-                .buttonStyle(HoverApprovalButtonStyle(background: Color.white.opacity(0.92), foreground: .black))
             }
         }
         .padding(.top, 12)
@@ -515,6 +537,7 @@ private struct HoverQuestionInterventionCard: View {
     let session: SessionState
     let intervention: SessionIntervention
     let sessionMonitor: SessionMonitor
+    var suppressControls = false
     var onQuestionInteractionStateChanged: (Bool) -> Void = { _ in }
     let onActionCompleted: () -> Void
 
@@ -533,7 +556,9 @@ private struct HoverQuestionInterventionCard: View {
                 Spacer(minLength: 0)
             }
 
-            if intervention.awaitsExternalContinuation,
+            if suppressControls {
+                HoverTerminalRoutedPromptNotice(session: session)
+            } else if intervention.awaitsExternalContinuation,
                session.clientInfo.prefersAnsweredQuestionFollowupAction {
                 VStack(alignment: .leading, spacing: 10) {
                     SessionQuestionForm(
@@ -620,6 +645,21 @@ private struct HoverQuestionInterventionCard: View {
         }
         .padding(.top, 12)
         .padding(.bottom, intervention.metadata["responseMode"] == "external_only" ? 12 : 18)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct HoverTerminalRoutedPromptNotice: View {
+    let session: SessionState
+
+    var body: some View {
+        Text(verbatim: AppLocalization.format(
+            "已保留在%@中处理。Ping Island 只提醒，不接管此处响应。",
+            session.isInTmux ? AppLocalization.string("终端") : session.interactionDisplayName
+        ))
+        .font(.system(size: 11, weight: .medium))
+        .foregroundColor(.white.opacity(0.64))
+        .fixedSize(horizontal: false, vertical: true)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 }

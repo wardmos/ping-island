@@ -31,6 +31,19 @@ final class SessionAttentionSoundEvaluatorTests: XCTestCase {
         )
     }
 
+    func testTerminalRoutedPromptContributesWithoutIslandIntervention() {
+        var session = makeSession(
+            autoApprovePermissions: false,
+            phase: .waitingForInput,
+            intervention: nil
+        )
+        session.suppressInAppPromptControls = true
+
+        XCTAssertTrue(
+            SessionAttentionSoundEvaluator.shouldContributeToAttentionSoundEdge(session)
+        )
+    }
+
     func testAutoApproveSuppressesContributionEvenWithApprovalIntervention() {
         // The bug: a PermissionRequest hook briefly inserts an approval
         // intervention before SessionMonitor auto-approves it. Without the

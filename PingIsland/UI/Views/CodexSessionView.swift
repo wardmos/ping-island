@@ -4,6 +4,7 @@ struct CodexSessionView: View {
     let session: SessionState
     let sessionMonitor: SessionMonitor
     @ObservedObject var viewModel: NotchViewModel
+    @ObservedObject private var settings = AppSettings.shared
     @State private var isHeaderHovered = false
 
     private enum DisplayLimits {
@@ -13,6 +14,12 @@ struct CodexSessionView: View {
 
     private var truncationNotice: String {
         AppLocalization.string(SessionDetailDisplayStrings.truncationNoticeKey)
+    }
+
+    private var shouldSuppressPromptControls: Bool {
+        session.shouldSuppressInAppPromptControls(
+            routePromptsToTerminal: settings.effectiveRoutePromptsToTerminal
+        )
     }
 
     var body: some View {
@@ -152,7 +159,9 @@ struct CodexSessionView: View {
 
             MarkdownText(intervention.message, color: .white.opacity(0.72), fontSize: 12)
 
-            if intervention.kind == .approval {
+            if shouldSuppressPromptControls {
+                terminalRoutedPromptNotice
+            } else if intervention.kind == .approval {
                 approvalButtons(intervention)
             } else {
                 questionForm(intervention)
@@ -164,6 +173,17 @@ struct CodexSessionView: View {
             RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .fill(Color.white.opacity(0.06))
         )
+    }
+
+    private var terminalRoutedPromptNotice: some View {
+        Text(verbatim: AppLocalization.format(
+            "已保留在%@中处理。Ping Island 只提醒，不接管此处响应。",
+            session.isInTmux ? AppLocalization.string("终端") : session.interactionDisplayName
+        ))
+        .font(.system(size: 12, weight: .medium))
+        .foregroundColor(.white.opacity(0.66))
+        .fixedSize(horizontal: false, vertical: true)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func approvalButtons(_ intervention: SessionIntervention) -> some View {

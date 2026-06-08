@@ -36,7 +36,7 @@ enum SessionConversationPreviewBuilder {
     }
 
     static func fallbackPreview(for session: SessionState) -> String? {
-        if session.needsApprovalResponse || session.needsQuestionResponse {
+        if session.needsPromptNotification {
             return attentionSummary(for: session)
         }
 
@@ -82,7 +82,7 @@ enum SessionConversationPreviewBuilder {
             }
         }
 
-        if session.needsApprovalResponse || session.needsQuestionResponse {
+        if session.needsPromptNotification {
             return attentionSummary(for: session)
         }
 

@@ -4,6 +4,8 @@ struct SessionManualAttentionTracker {
     private var previousApprovalToolUseIDs: [String: String] = [:]
     private var previousQuestionIds = Set<String>()
     private var previousQuestionInterventionIDs: [String: String] = [:]
+    private var previousTerminalRoutedPromptIds = Set<String>()
+    private var previousTerminalRoutedPromptKeys: [String: String] = [:]
 
     mutating func consumeNewAttentionSession(from instances: [SessionState]) -> SessionState? {
         let approvalSessions = instances.filter { $0.needsApprovalResponse }
@@ -47,15 +49,45 @@ struct SessionManualAttentionTracker {
         )
         let attentionQuestionIds = newQuestionIds.union(refreshedQuestionIds)
 
+        let terminalRoutedPromptSessions = instances.filter(\.suppressInAppPromptControls)
+        let currentTerminalRoutedPromptIds = Set(terminalRoutedPromptSessions.map(\.stableId))
+        let currentTerminalRoutedPromptKeys = Dictionary(
+            uniqueKeysWithValues: terminalRoutedPromptSessions.map { session in
+                (
+                    session.stableId,
+                    session.activePermission?.toolUseId
+                        ?? session.intervention?.id
+                        ?? session.phase.description
+                )
+            }
+        )
+        let newTerminalRoutedPromptIds = currentTerminalRoutedPromptIds
+            .subtracting(previousTerminalRoutedPromptIds)
+        let refreshedTerminalRoutedPromptIds = Set<String>(
+            currentTerminalRoutedPromptKeys.compactMap { sessionId, promptKey in
+                guard let previousPromptKey = previousTerminalRoutedPromptKeys[sessionId],
+                      previousPromptKey != promptKey else {
+                    return nil
+                }
+                return sessionId
+            }
+        )
+        let attentionTerminalRoutedPromptIds = newTerminalRoutedPromptIds
+            .union(refreshedTerminalRoutedPromptIds)
+
         defer {
             previousApprovalIds = currentApprovalIds
             previousApprovalToolUseIDs = currentApprovalToolUseIDs
             previousQuestionIds = currentQuestionIds
             previousQuestionInterventionIDs = currentQuestionInterventionIDs
+            previousTerminalRoutedPromptIds = currentTerminalRoutedPromptIds
+            previousTerminalRoutedPromptKeys = currentTerminalRoutedPromptKeys
         }
 
         let attentionCandidates = instances.filter { session in
-            attentionApprovalIds.contains(session.stableId) || attentionQuestionIds.contains(session.stableId)
+            attentionApprovalIds.contains(session.stableId)
+                || attentionQuestionIds.contains(session.stableId)
+                || attentionTerminalRoutedPromptIds.contains(session.stableId)
         }
 
         return attentionCandidates.sorted(by: attentionSort).first
