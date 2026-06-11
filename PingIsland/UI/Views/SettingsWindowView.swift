@@ -3155,7 +3155,7 @@ private struct SettingsPanelContentView: View {
             SettingsSectionCard(title: "审批与提问") {
                 SettingsToggleLine(
                     title: "保留终端中的提问与审批",
-                    subtitle: "开启后 Ping Island 不再代答 Claude / Codex 等的工具审批和 AskUserQuestion，所有提问保留在终端中处理；状态指示仍会显示。",
+                    subtitle: "开启后终端中的 Claude / Codex 审批仍会保留；如果 Island 有可回写的审批请求，也可以直接在 Island 里批准或拒绝。",
                     isOn: $settings.routePromptsToTerminal
                 )
                 SettingsLineDivider()
@@ -3177,6 +3177,44 @@ private struct SettingsPanelContentView: View {
                         .disabled(!settings.autoRoutePromptsToTerminalWhenIdleEnabled)
                         .opacity(settings.autoRoutePromptsToTerminalWhenIdleEnabled ? 1 : 0.45)
                 }
+            }
+
+            SettingsSectionCard(title: "Hook 调试日志") {
+                SettingsToggleLine(
+                    title: "记录 Hook 调试日志",
+                    subtitle: "关闭后 bridge 不再追加 ~/.ping-island-debug 下的 hook 调试记录，并在下次 hook 触发时清理既有日志。",
+                    isOn: $settings.hookDebugLoggingEnabled
+                )
+                SettingsLineDivider()
+
+                SettingsSliderLine(
+                    title: "日志保留天数",
+                    subtitle: "超过该天数的 hook 调试日志会被自动删除。",
+                    value: Binding(
+                        get: { Double(settings.hookDebugLogRetentionDays) },
+                        set: { settings.hookDebugLogRetentionDays = Int($0.rounded()) }
+                    ),
+                    range: Double(BridgeRuntimeConfigSnapshot.minimumDebugLogRetentionDays)...Double(BridgeRuntimeConfigSnapshot.maximumDebugLogRetentionDays),
+                    step: 1,
+                    format: { "\(Int($0.rounded())) 天" }
+                )
+                .disabled(!settings.hookDebugLoggingEnabled)
+                .opacity(settings.hookDebugLoggingEnabled ? 1 : 0.45)
+                SettingsLineDivider()
+
+                SettingsSliderLine(
+                    title: "最大日志占用",
+                    subtitle: "当 ~/.ping-island-debug 超过该大小时，会优先删除最旧的 hook 调试日志。",
+                    value: Binding(
+                        get: { Double(settings.hookDebugLogMaxDirectoryMegabytes) },
+                        set: { settings.hookDebugLogMaxDirectoryMegabytes = Int($0.rounded()) }
+                    ),
+                    range: Double(BridgeRuntimeConfigSnapshot.minimumDebugLogMaxDirectoryMegabytes)...Double(BridgeRuntimeConfigSnapshot.maximumDebugLogMaxDirectoryMegabytes),
+                    step: 16,
+                    format: { "\(Int($0.rounded())) MB" }
+                )
+                .disabled(!settings.hookDebugLoggingEnabled)
+                .opacity(settings.hookDebugLoggingEnabled ? 1 : 0.45)
             }
 
 #if APP_STORE

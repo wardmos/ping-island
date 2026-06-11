@@ -150,6 +150,14 @@
 "审批与提问" = "审批与提问";
 "保留终端中的提问与审批" = "保留终端中的提问与审批";
 "开启后 Ping Island 不再代答 Claude / Codex 等的工具审批和 AskUserQuestion，所有提问保留在终端中处理；状态指示仍会显示。" = "开启后 Ping Island 不再代答 Claude / Codex 等的工具审批和 AskUserQuestion，所有提问保留在终端中处理；状态指示仍会显示。";
+"开启后终端中的 Claude / Codex 审批仍会保留；如果 Island 有可回写的审批请求，也可以直接在 Island 里批准或拒绝。" = "开启后终端中的 Claude / Codex 审批仍会保留；如果 Island 有可回写的审批请求，也可以直接在 Island 里批准或拒绝。";
+"Hook 调试日志" = "Hook 调试日志";
+"记录 Hook 调试日志" = "记录 Hook 调试日志";
+"关闭后 bridge 不再追加 ~/.ping-island-debug 下的 hook 调试记录，并在下次 hook 触发时清理既有日志。" = "关闭后 bridge 不再追加 ~/.ping-island-debug 下的 hook 调试记录，并在下次 hook 触发时清理既有日志。";
+"日志保留天数" = "日志保留天数";
+"超过该天数的 hook 调试日志会被自动删除。" = "超过该天数的 hook 调试日志会被自动删除。";
+"最大日志占用" = "最大日志占用";
+"当 ~/.ping-island-debug 超过该大小时，会优先删除最旧的 hook 调试日志。" = "当 ~/.ping-island-debug 超过该大小时，会优先删除最旧的 hook 调试日志。";
 "系统权限" = "系统权限";
 "辅助功能" = "辅助功能";
 "管理 ~/.claude/settings.json，使用统一 PingIslandBridge hooks 入口" = "管理 ~/.claude/settings.json，使用统一 PingIslandBridge hooks 入口";

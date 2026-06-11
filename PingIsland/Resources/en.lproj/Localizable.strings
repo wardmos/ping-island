@@ -150,6 +150,14 @@
 "审批与提问" = "Approvals & questions";
 "保留终端中的提问与审批" = "Keep prompts & approvals in the terminal";
 "开启后 Ping Island 不再代答 Claude / Codex 等的工具审批和 AskUserQuestion，所有提问保留在终端中处理；状态指示仍会显示。" = "When on, Ping Island no longer answers tool approvals or AskUserQuestion for Claude / Codex / etc. — those prompts stay in your terminal. Status indicators still appear.";
+"开启后终端中的 Claude / Codex 审批仍会保留；如果 Island 有可回写的审批请求，也可以直接在 Island 里批准或拒绝。" = "When on, Claude / Codex approvals stay available in the terminal; if Island can write the response back, you can still approve or deny directly in Island.";
+"Hook 调试日志" = "Hook debug logs";
+"记录 Hook 调试日志" = "Record hook debug logs";
+"关闭后 bridge 不再追加 ~/.ping-island-debug 下的 hook 调试记录，并在下次 hook 触发时清理既有日志。" = "When off, the bridge stops appending hook debug records under ~/.ping-island-debug and cleans existing logs the next time a hook fires.";
+"日志保留天数" = "Log retention";
+"超过该天数的 hook 调试日志会被自动删除。" = "Hook debug logs older than this are deleted automatically.";
+"最大日志占用" = "Maximum log usage";
+"当 ~/.ping-island-debug 超过该大小时，会优先删除最旧的 hook 调试日志。" = "When ~/.ping-island-debug exceeds this size, the oldest hook debug logs are deleted first.";
 "系统权限" = "System permissions";
 "辅助功能" = "Accessibility";
 "管理 ~/.claude/settings.json，使用统一 PingIslandBridge hooks 入口" = "Manage ~/.claude/settings.json using the unified PingIslandBridge hooks entrypoint";

@@ -22,7 +22,7 @@ func islandBridgeHealthCheckRoundTripsThroughSocketServer() async throws {
             let process = try RunningProcess(
                 executableURL: executable,
                 arguments: ["--mode", "health-check"],
-                environment: ["ISLAND_SOCKET_PATH": socketPath]
+                environment: bridgeTestEnvironment(["ISLAND_SOCKET_PATH": socketPath])
             )
 
             let result = process.waitForExit()
@@ -40,9 +40,9 @@ func islandBridgeHealthCheckFailsWhenSocketIsUnavailable() throws {
     let process = try RunningProcess(
         executableURL: executable,
         arguments: ["--mode", "health-check"],
-        environment: [
+        environment: bridgeTestEnvironment([
             "ISLAND_SOCKET_PATH": "/tmp/ping-island-missing-\(UUID().uuidString).sock"
-        ]
+        ])
     )
 
     let result = process.waitForExit()
@@ -57,10 +57,10 @@ func islandBridgeAllowsStateOnlyEventsWhenAppIsUnavailable() throws {
     let process = try RunningProcess(
         executableURL: executable,
         arguments: ["--source", "codex"],
-        environment: [
+        environment: bridgeTestEnvironment([
             "ISLAND_SOCKET_PATH": "/tmp/ping-island-missing-\(UUID().uuidString).sock",
             "PWD": "/tmp/codex-demo"
-        ],
+        ]),
         stdin: """
         {
           "event": "PostToolUse",
@@ -83,10 +83,10 @@ func islandBridgeDoesNotWaitForStdinEOFWhenPayloadAlreadyArrived() async throws 
     let process = try RunningProcess(
         executableURL: executable,
         arguments: ["--source", "codex"],
-        environment: [
+        environment: bridgeTestEnvironment([
             "ISLAND_SOCKET_PATH": "/tmp/ping-island-missing-\(UUID().uuidString).sock",
             "PWD": "/tmp/codex-demo"
-        ],
+        ]),
         stdin: """
         {
           "event": "PostToolUse",
@@ -118,10 +118,10 @@ func islandBridgeWaitsForSplitJSONPayloadBeforeContinuing() async throws {
     let process = try RunningProcess(
         executableURL: executable,
         arguments: ["--source", "codex"],
-        environment: [
+        environment: bridgeTestEnvironment([
             "ISLAND_SOCKET_PATH": "/tmp/ping-island-missing-\(UUID().uuidString).sock",
             "PWD": "/tmp/codex-demo"
-        ],
+        ]),
         closeStdinOnLaunch: false
     )
     defer { process.closeStdin() }
@@ -171,12 +171,12 @@ func islandBridgeRoundTripsApprovalRequestsThroughSocketServer() async throws {
             let process = try RunningProcess(
                 executableURL: executable,
                 arguments: ["--source", "claude"],
-                environment: [
+                environment: bridgeTestEnvironment([
                     "ISLAND_SOCKET_PATH": socketPath,
                     "PWD": "/tmp/e2e-demo",
                     "TERM_PROGRAM": "iTerm.app",
                     "ITERM_SESSION_ID": "iterm-e2e-1"
-                ],
+                ]),
                 stdin: """
                 {
                   "hook_event_name": "PermissionRequest",
@@ -317,6 +317,13 @@ func remoteAgentForwardsCodexAppServerStateUpdates() async throws {
         #expect(event.payload.clientInfo.transport == "ssh")
         #expect(event.payload.clientInfo.sessionFilePath == "/home/dev/.codex/sessions/rollout.jsonl")
     }
+}
+
+private func bridgeTestEnvironment(_ values: [String: String] = [:]) -> [String: String] {
+    var environment = values
+    environment[BridgeRuntimeConfig.configPathEnvironmentKey] =
+        "/tmp/ping-island-test-bridge-config-\(UUID().uuidString).json"
+    return environment
 }
 
 private func createCodexStateDatabase(at url: URL, updatedAtMs: Int64) throws {

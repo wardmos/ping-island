@@ -2,9 +2,14 @@ import Foundation
 
 public struct BridgeRuntimeConfig: Sendable, Equatable {
     public var routePromptsToTerminal: Bool
+    public var debugLogPolicy: BridgeDebugLogPolicy
 
-    public init(routePromptsToTerminal: Bool = false) {
+    public init(
+        routePromptsToTerminal: Bool = false,
+        debugLogPolicy: BridgeDebugLogPolicy = .default
+    ) {
         self.routePromptsToTerminal = routePromptsToTerminal
+        self.debugLogPolicy = debugLogPolicy
     }
 
     public static let `default` = BridgeRuntimeConfig()
@@ -36,10 +41,15 @@ public struct BridgeRuntimeConfig: Sendable, Equatable {
             return .default
         }
         let route = (json["routePromptsToTerminal"] as? Bool) ?? false
-        return BridgeRuntimeConfig(routePromptsToTerminal: route)
+        return BridgeRuntimeConfig(
+            routePromptsToTerminal: route,
+            debugLogPolicy: BridgeDebugLogPolicy(jsonObject: json)
+        )
     }
 
     public var jsonObject: [String: Any] {
-        ["routePromptsToTerminal": routePromptsToTerminal]
+        var object = debugLogPolicy.jsonObject
+        object["routePromptsToTerminal"] = routePromptsToTerminal
+        return object
     }
 }

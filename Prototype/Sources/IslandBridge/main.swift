@@ -47,7 +47,8 @@ struct IslandBridgeMain {
                     envelope: envelope,
                     arguments: CommandLine.arguments,
                     environment: environment,
-                    stdinData: stdinData
+                    stdinData: stdinData,
+                    policy: runtimeConfig.debugLogPolicy
                 )
 
                 let socketPath = environment["ISLAND_SOCKET_PATH"] ?? "/tmp/island.sock"
@@ -56,7 +57,8 @@ struct IslandBridgeMain {
                         envelope: envelope,
                         environment: environment,
                         socketPath: socketPath,
-                        outcome: "skipped_qoder_ide_event"
+                        outcome: "skipped_qoder_ide_event",
+                        policy: runtimeConfig.debugLogPolicy
                     )
                     return
                 }
@@ -71,14 +73,16 @@ struct IslandBridgeMain {
                         envelope: envelope,
                         environment: environment,
                         socketPath: socketPath,
-                        outcome: "delivered"
+                        outcome: "delivered",
+                        policy: runtimeConfig.debugLogPolicy
                     )
                 } catch BridgeError.connectionFailed {
                     try? BridgeDebugLogger.logDeliveryIfNeeded(
                         envelope: envelope,
                         environment: environment,
                         socketPath: socketPath,
-                        outcome: "connection_failed"
+                        outcome: "connection_failed",
+                        policy: runtimeConfig.debugLogPolicy
                     )
                     throw BridgeError.connectionFailed
                 }
@@ -361,6 +365,9 @@ private struct JSONStreamCompletionState {
 }
 
 private enum BridgeDebugLogger {
+    private static let cleanupMarkerFileName = ".cleanup-state"
+    private static let cleanupMinimumInterval: TimeInterval = 3_600
+
     private static let interestingEnvironmentKeys: Set<String> = [
         "PWD",
         "TERM",
@@ -382,13 +389,22 @@ private enum BridgeDebugLogger {
         envelope: BridgeEnvelope,
         arguments: [String],
         environment: [String: String],
-        stdinData: Data
+        stdinData: Data,
+        policy: BridgeDebugLogPolicy
     ) throws {
         guard let target = debugTarget(for: envelope) else { return }
 
         let fileManager = FileManager.default
-        let directory = debugDirectory(for: target, environment: environment)
+        let location = debugLocation(for: target, environment: environment)
+        let directory = location.targetDirectory
         try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+        cleanupIfNeeded(
+            rootDirectory: location.rootDirectory,
+            policy: policy,
+            fileManager: fileManager
+        )
+
+        guard policy.isEnabled else { return }
 
         let record = BridgeDebugRecord(
             id: UUID(),
@@ -474,16 +490,48 @@ private enum BridgeDebugLogger {
         return nil
     }
 
-    private static func debugDirectory(for target: String, environment: [String: String]) -> URL {
+    private static func debugLocation(for target: String, environment: [String: String]) -> DebugLogLocation {
         if target == "codex-hooks",
            let customPath = environment["PING_ISLAND_CODEX_HOOK_DEBUG_DIR"],
            !customPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return URL(fileURLWithPath: NSString(string: customPath).expandingTildeInPath, isDirectory: true)
+            let directory = URL(
+                fileURLWithPath: NSString(string: customPath).expandingTildeInPath,
+                isDirectory: true
+            )
+            return DebugLogLocation(rootDirectory: directory, targetDirectory: directory)
         }
 
-        return FileManager.default.homeDirectoryForCurrentUser
+        let rootDirectory = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".ping-island-debug", isDirectory: true)
-            .appendingPathComponent(target, isDirectory: true)
+        return DebugLogLocation(
+            rootDirectory: rootDirectory,
+            targetDirectory: rootDirectory.appendingPathComponent(target, isDirectory: true)
+        )
+    }
+
+    private static func cleanupIfNeeded(
+        rootDirectory: URL,
+        policy: BridgeDebugLogPolicy,
+        fileManager: FileManager
+    ) {
+        let markerURL = rootDirectory.appendingPathComponent(cleanupMarkerFileName)
+        if policy.isEnabled,
+           let attributes = try? fileManager.attributesOfItem(atPath: markerURL.path),
+           let modifiedAt = attributes[.modificationDate] as? Date,
+           Date().timeIntervalSince(modifiedAt) < cleanupMinimumInterval {
+            return
+        }
+
+        do {
+            try BridgeDebugLogPruner.prune(
+                directory: rootDirectory,
+                policy: policy,
+                excludingFileNames: [cleanupMarkerFileName]
+            )
+            try Data().write(to: markerURL, options: .atomic)
+        } catch {
+            // Debug log cleanup must never affect hook delivery.
+        }
     }
 
     private static func filteredEnvironment(_ environment: [String: String]) -> [String: String] {
@@ -502,13 +550,22 @@ private enum BridgeDebugLogger {
         envelope: BridgeEnvelope,
         environment: [String: String],
         socketPath: String,
-        outcome: String
+        outcome: String,
+        policy: BridgeDebugLogPolicy
     ) throws {
         guard let target = debugTarget(for: envelope) else { return }
 
         let fileManager = FileManager.default
-        let directory = debugDirectory(for: target, environment: environment)
+        let location = debugLocation(for: target, environment: environment)
+        let directory = location.targetDirectory
         try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+        cleanupIfNeeded(
+            rootDirectory: location.rootDirectory,
+            policy: policy,
+            fileManager: fileManager
+        )
+
+        guard policy.isEnabled else { return }
 
         let record = BridgeDebugRecord(
             id: UUID(),
@@ -555,6 +612,11 @@ private enum BridgeDebugLogger {
         formatter.dateFormat = "yyyyMMdd"
         return formatter.string(from: date)
     }
+}
+
+private struct DebugLogLocation {
+    let rootDirectory: URL
+    let targetDirectory: URL
 }
 
 private struct BridgeDebugRecord: Codable, Sendable {

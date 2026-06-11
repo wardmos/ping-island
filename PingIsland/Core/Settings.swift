@@ -392,7 +392,7 @@ final class AppSettingsStore: ObservableObject {
     nonisolated static let maximumNotchModuleWidth: Double = 420
 
     private let defaults: UserDefaults
-    private let bridgeRuntimeConfigWriter: (Bool) -> Void
+    private let bridgeRuntimeConfigWriter: (BridgeRuntimeConfigSnapshot) -> Void
     private var isBootstrapping = true
     private var subagentVisibilityModeStorage: SubagentVisibilityMode
 
@@ -457,6 +457,9 @@ final class AppSettingsStore: ObservableObject {
         static let routePromptsToTerminal = "routePromptsToTerminal"
         static let autoRoutePromptsToTerminalWhenIdleEnabled = "autoRoutePromptsToTerminalWhenIdleEnabled"
         static let autoRoutePromptsIdleDelay = "autoRoutePromptsIdleDelay"
+        static let hookDebugLoggingEnabled = "hookDebugLoggingEnabled"
+        static let hookDebugLogRetentionDays = "hookDebugLogRetentionDays"
+        static let hookDebugLogMaxDirectoryMegabytes = "hookDebugLogMaxDirectoryMegabytes"
         static let analyticsEnabled = AppSettingsDefaultKeys.analyticsEnabled
         static let analyticsConsentPromptCompleted = AppSettingsDefaultKeys.analyticsConsentPromptCompleted
     }
@@ -976,6 +979,46 @@ final class AppSettingsStore: ObservableObject {
         }
     }
 
+    @Published var hookDebugLoggingEnabled: Bool {
+        didSet {
+            guard !isBootstrapping else { return }
+            defaults.set(hookDebugLoggingEnabled, forKey: Keys.hookDebugLoggingEnabled)
+            recordTelemetrySettingChange(key: Keys.hookDebugLoggingEnabled, value: hookDebugLoggingEnabled.description)
+            writeEffectiveBridgeRuntimeConfig()
+        }
+    }
+
+    @Published var hookDebugLogRetentionDays: Int {
+        didSet {
+            let clamped = BridgeRuntimeConfigSnapshot.clampedDebugLogRetentionDays(hookDebugLogRetentionDays)
+            if hookDebugLogRetentionDays != clamped {
+                hookDebugLogRetentionDays = clamped
+                return
+            }
+            guard !isBootstrapping else { return }
+            defaults.set(hookDebugLogRetentionDays, forKey: Keys.hookDebugLogRetentionDays)
+            writeEffectiveBridgeRuntimeConfig()
+        }
+    }
+
+    @Published var hookDebugLogMaxDirectoryMegabytes: Int {
+        didSet {
+            let clamped = BridgeRuntimeConfigSnapshot.clampedDebugLogMaxDirectoryMegabytes(
+                hookDebugLogMaxDirectoryMegabytes
+            )
+            if hookDebugLogMaxDirectoryMegabytes != clamped {
+                hookDebugLogMaxDirectoryMegabytes = clamped
+                return
+            }
+            guard !isBootstrapping else { return }
+            defaults.set(
+                hookDebugLogMaxDirectoryMegabytes,
+                forKey: Keys.hookDebugLogMaxDirectoryMegabytes
+            )
+            writeEffectiveBridgeRuntimeConfig()
+        }
+    }
+
     @Published private(set) var idleAutoRoutePromptsToTerminalActive: Bool = false {
         didSet {
             guard !isBootstrapping else { return }
@@ -986,6 +1029,15 @@ final class AppSettingsStore: ObservableObject {
     var effectiveRoutePromptsToTerminal: Bool {
         routePromptsToTerminal
             || (autoRoutePromptsToTerminalWhenIdleEnabled && idleAutoRoutePromptsToTerminalActive)
+    }
+
+    var bridgeRuntimeConfigSnapshot: BridgeRuntimeConfigSnapshot {
+        BridgeRuntimeConfigSnapshot(
+            routePromptsToTerminal: effectiveRoutePromptsToTerminal,
+            debugLoggingEnabled: hookDebugLoggingEnabled,
+            debugLogRetentionDays: hookDebugLogRetentionDays,
+            debugLogMaxDirectoryMegabytes: hookDebugLogMaxDirectoryMegabytes
+        )
     }
 
     func setIdleAutoRoutePromptsToTerminalActive(_ active: Bool) {
@@ -1128,6 +1180,15 @@ final class AppSettingsStore: ObservableObject {
         exists ? defaults.double(forKey: key) : defaultValue
     }
 
+    private static func intValue(
+        from defaults: UserDefaults,
+        key: String,
+        exists: Bool,
+        default defaultValue: Int
+    ) -> Int {
+        exists ? defaults.integer(forKey: key) : defaultValue
+    }
+
     private func containsPersistedValue(forKey key: String) -> Bool {
         defaults.dictionaryRepresentation()[key] != nil
     }
@@ -1232,8 +1293,8 @@ final class AppSettingsStore: ObservableObject {
 
     init(
         defaults: UserDefaults = .standard,
-        bridgeRuntimeConfigWriter: @escaping (Bool) -> Void = {
-            BridgeRuntimeConfigWriter.write(routePromptsToTerminal: $0)
+        bridgeRuntimeConfigWriter: @escaping (BridgeRuntimeConfigSnapshot) -> Void = {
+            BridgeRuntimeConfigWriter.write($0)
         }
     ) {
         self.defaults = defaults
@@ -1510,6 +1571,28 @@ final class AppSettingsStore: ObservableObject {
         _autoRoutePromptsIdleDelay = Published(initialValue: AutoRoutePromptsIdleDelay(
             rawValue: defaults.integer(forKey: Keys.autoRoutePromptsIdleDelay)
         ) ?? .thirtyMinutes)
+        _hookDebugLoggingEnabled = Published(initialValue: Self.boolValue(
+            from: defaults,
+            key: Keys.hookDebugLoggingEnabled,
+            exists: persistedKeys.contains(Keys.hookDebugLoggingEnabled),
+            default: BridgeRuntimeConfigSnapshot.defaultDebugLoggingEnabled
+        ))
+        _hookDebugLogRetentionDays = Published(initialValue: BridgeRuntimeConfigSnapshot.clampedDebugLogRetentionDays(
+            Self.intValue(
+                from: defaults,
+                key: Keys.hookDebugLogRetentionDays,
+                exists: persistedKeys.contains(Keys.hookDebugLogRetentionDays),
+                default: BridgeRuntimeConfigSnapshot.defaultDebugLogRetentionDays
+            )
+        ))
+        _hookDebugLogMaxDirectoryMegabytes = Published(initialValue: BridgeRuntimeConfigSnapshot.clampedDebugLogMaxDirectoryMegabytes(
+            Self.intValue(
+                from: defaults,
+                key: Keys.hookDebugLogMaxDirectoryMegabytes,
+                exists: persistedKeys.contains(Keys.hookDebugLogMaxDirectoryMegabytes),
+                default: BridgeRuntimeConfigSnapshot.defaultDebugLogMaxDirectoryMegabytes
+            )
+        ))
 
         if defaults.string(forKey: Keys.soundThemeMode) == nil {
             defaults.set(resolvedSoundThemeMode.rawValue, forKey: Keys.soundThemeMode)
@@ -1528,12 +1611,12 @@ final class AppSettingsStore: ObservableObject {
     }
 
     private func writeEffectiveBridgeRuntimeConfig() {
-        let effective = effectiveRoutePromptsToTerminal
-        bridgeRuntimeConfigWriter(effective)
+        let config = bridgeRuntimeConfigSnapshot
+        bridgeRuntimeConfigWriter(config)
         NotificationCenter.default.post(
             name: .bridgeRuntimeConfigDidChange,
             object: self,
-            userInfo: ["routePromptsToTerminal": effective]
+            userInfo: ["config": config]
         )
     }
 

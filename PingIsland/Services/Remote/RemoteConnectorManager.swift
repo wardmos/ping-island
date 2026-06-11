@@ -55,15 +55,15 @@ final class RemoteConnectorManager: ObservableObject {
 
     private func observeBridgeRuntimeConfigChanges() {
         NotificationCenter.default.publisher(for: .bridgeRuntimeConfigDidChange)
-            .compactMap { $0.userInfo?["routePromptsToTerminal"] as? Bool }
+            .compactMap { $0.userInfo?["config"] as? BridgeRuntimeConfigSnapshot }
             .removeDuplicates()
-            .sink { [weak self] routePromptsToTerminal in
-                self?.syncRuntimeConfigToConnectedEndpoints(routePromptsToTerminal: routePromptsToTerminal)
+            .sink { [weak self] config in
+                self?.syncRuntimeConfigToConnectedEndpoints(config: config)
             }
             .store(in: &cancellables)
     }
 
-    private func syncRuntimeConfigToConnectedEndpoints(routePromptsToTerminal: Bool) {
+    private func syncRuntimeConfigToConnectedEndpoints(config: BridgeRuntimeConfigSnapshot) {
         for endpointID in connectors.keys {
             let password = resolvedCredential(for: endpointID, requestedPassword: nil).password
             Task { [weak self] in
@@ -71,7 +71,7 @@ final class RemoteConnectorManager: ObservableObject {
                     try await self?.writeRemoteRuntimeConfig(
                         endpointID: endpointID,
                         password: password,
-                        routePromptsToTerminal: routePromptsToTerminal
+                        config: config
                     )
                 } catch {
                     await MainActor.run {
@@ -173,7 +173,7 @@ final class RemoteConnectorManager: ObservableObject {
                 try await writeRemoteRuntimeConfig(
                     endpointID: endpointID,
                     password: effectivePassword,
-                    routePromptsToTerminal: AppSettings.shared.effectiveRoutePromptsToTerminal
+                    config: AppSettings.shared.bridgeRuntimeConfigSnapshot
                 )
 
                 do {
@@ -215,7 +215,7 @@ final class RemoteConnectorManager: ObservableObject {
                     try await writeRemoteRuntimeConfig(
                         endpointID: endpointID,
                         password: effectivePassword,
-                        routePromptsToTerminal: AppSettings.shared.effectiveRoutePromptsToTerminal
+                        config: AppSettings.shared.bridgeRuntimeConfigSnapshot
                     )
 
                     stage = "ensure-remote-agent"
@@ -454,10 +454,10 @@ final class RemoteConnectorManager: ObservableObject {
     private func writeRemoteRuntimeConfig(
         endpointID: UUID,
         password: String?,
-        routePromptsToTerminal: Bool
+        config: BridgeRuntimeConfigSnapshot
     ) async throws {
         guard let endpoint = endpoint(for: endpointID),
-              let data = BridgeRuntimeConfigWriter.payloadData(routePromptsToTerminal: routePromptsToTerminal) else {
+              let data = BridgeRuntimeConfigWriter.payloadData(config) else {
             return
         }
 
@@ -471,7 +471,7 @@ final class RemoteConnectorManager: ObservableObject {
         )
         try await writeRemoteBridgeLauncher(endpoint: endpoint, password: password)
         logger.debug(
-            "Remote runtime config synced endpoint=\(endpoint.id.uuidString, privacy: .public) routePromptsToTerminal=\(routePromptsToTerminal, privacy: .public)"
+            "Remote runtime config synced endpoint=\(endpoint.id.uuidString, privacy: .public) routePromptsToTerminal=\(config.routePromptsToTerminal, privacy: .public) debugLoggingEnabled=\(config.debugLoggingEnabled, privacy: .public)"
         )
     }
 

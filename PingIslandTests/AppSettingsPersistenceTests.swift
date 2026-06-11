@@ -19,6 +19,18 @@ final class AppSettingsPersistenceTests: XCTestCase {
         return store
     }
 
+    private func makeStore(
+        defaults: UserDefaults,
+        bridgeRuntimeConfigWriter: @escaping (BridgeRuntimeConfigSnapshot) -> Void
+    ) -> AppSettingsStore {
+        let store = AppSettingsStore(
+            defaults: defaults,
+            bridgeRuntimeConfigWriter: bridgeRuntimeConfigWriter
+        )
+        Self.retainedStores.append(store)
+        return store
+    }
+
     func testShortcutsUseDefaultsWhenNoPreferenceExists() {
         let defaults = makeDefaults()
         let store = makeStore(defaults: defaults)
@@ -199,6 +211,71 @@ final class AppSettingsPersistenceTests: XCTestCase {
         XCTAssertTrue(reloadedStore.analyticsConsentPromptCompleted)
         XCTAssertNil(defaults.object(forKey: "analyticsEnabled"))
         XCTAssertEqual(defaults.object(forKey: "analyticsConsentPromptCompleted") as? Bool, true)
+    }
+
+    func testHookDebugLogSettingsPersistAndWriteRuntimeConfig() {
+        let defaults = makeDefaults()
+        var snapshots: [BridgeRuntimeConfigSnapshot] = []
+        let store = makeStore(defaults: defaults) { snapshot in
+            snapshots.append(snapshot)
+        }
+
+        XCTAssertEqual(snapshots.last?.debugLoggingEnabled, true)
+        XCTAssertEqual(snapshots.last?.debugLogRetentionDays, 7)
+        XCTAssertEqual(snapshots.last?.debugLogMaxDirectoryMegabytes, 256)
+
+        store.hookDebugLoggingEnabled = false
+        store.hookDebugLogRetentionDays = 14
+        store.hookDebugLogMaxDirectoryMegabytes = 128
+
+        let reloadedStore = makeStore(defaults: defaults) { snapshot in
+            snapshots.append(snapshot)
+        }
+
+        XCTAssertFalse(reloadedStore.hookDebugLoggingEnabled)
+        XCTAssertEqual(reloadedStore.hookDebugLogRetentionDays, 14)
+        XCTAssertEqual(reloadedStore.hookDebugLogMaxDirectoryMegabytes, 128)
+        XCTAssertEqual(defaults.object(forKey: "hookDebugLoggingEnabled") as? Bool, false)
+        XCTAssertEqual(defaults.object(forKey: "hookDebugLogRetentionDays") as? Int, 14)
+        XCTAssertEqual(defaults.object(forKey: "hookDebugLogMaxDirectoryMegabytes") as? Int, 128)
+        XCTAssertEqual(snapshots.last?.routePromptsToTerminal, false)
+        XCTAssertEqual(snapshots.last?.debugLoggingEnabled, false)
+        XCTAssertEqual(snapshots.last?.debugLogRetentionDays, 14)
+        XCTAssertEqual(snapshots.last?.debugLogMaxDirectoryMegabytes, 128)
+    }
+
+    func testHookDebugLogSettingsClampOutOfRangeValues() {
+        let defaults = makeDefaults()
+        let store = makeStore(defaults: defaults)
+
+        store.hookDebugLogRetentionDays = 500
+        store.hookDebugLogMaxDirectoryMegabytes = 2
+
+        XCTAssertEqual(
+            store.hookDebugLogRetentionDays,
+            BridgeRuntimeConfigSnapshot.maximumDebugLogRetentionDays
+        )
+        XCTAssertEqual(
+            store.hookDebugLogMaxDirectoryMegabytes,
+            BridgeRuntimeConfigSnapshot.minimumDebugLogMaxDirectoryMegabytes
+        )
+    }
+
+    func testBridgeRuntimeConfigWriterIncludesHookDebugLogSettings() throws {
+        let snapshot = BridgeRuntimeConfigSnapshot(
+            routePromptsToTerminal: true,
+            debugLoggingEnabled: false,
+            debugLogRetentionDays: 10,
+            debugLogMaxDirectoryMegabytes: 64
+        )
+
+        let data = try XCTUnwrap(BridgeRuntimeConfigWriter.payloadData(snapshot))
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+
+        XCTAssertEqual(json["routePromptsToTerminal"] as? Bool, true)
+        XCTAssertEqual(json["debugLoggingEnabled"] as? Bool, false)
+        XCTAssertEqual(json["debugLogRetentionDays"] as? Int, 10)
+        XCTAssertEqual(json["debugLogMaxDirectoryMegabytes"] as? Int, 64)
     }
 
     func testUsageVisibilityPersists() {
