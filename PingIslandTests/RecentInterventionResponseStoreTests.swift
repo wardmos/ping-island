@@ -223,6 +223,99 @@ final class RecentInterventionResponseStoreTests: XCTestCase {
         XCTAssertEqual(replay?.updatedInput?["answers"]?.value as? [String: String], ["project": "会话层"])
     }
 
+    func testRemoteBridgeClaudeAnswerReplaysForDuplicatePermissionRequest() {
+        // Remote `.remoteBridge` AskUserQuestion answered, then the duplicate
+        // PermissionRequest re-fire must replay the answer instead of re-prompting.
+        var store = RecentInterventionResponseStore(ttl: 30)
+
+        let clientInfo = SessionClientInfo(
+            kind: .claudeCode,
+            profileID: "claude_code",
+            name: "Claude Code",
+            bundleIdentifier: "com.anthropic.claudecode"
+        )
+        let questionEvent = HookEvent(
+            sessionId: "remote-claude-session",
+            cwd: "/tmp/project",
+            event: "PreToolUse",
+            status: "waiting_for_input",
+            provider: .claude,
+            clientInfo: clientInfo,
+            pid: nil,
+            tty: nil,
+            tool: "AskUserQuestion",
+            toolInput: [
+                "questions": AnyCodable([
+                    [
+                        "id": "module",
+                        "header": "方向",
+                        "question": "你想先处理哪个模块？",
+                        "multiSelect": true,
+                        "options": [
+                            ["label": "会话层"],
+                            ["label": "UI 层"]
+                        ]
+                    ]
+                ])
+            ],
+            toolUseId: "toolu_remote_1",
+            notificationType: nil,
+            message: nil,
+            ingress: .remoteBridge
+        )
+
+        let duplicatePermissionEvent = HookEvent(
+            sessionId: "remote-claude-session",
+            cwd: "/tmp/project",
+            event: "PermissionRequest",
+            status: "waiting_for_approval",
+            provider: .claude,
+            clientInfo: clientInfo,
+            pid: nil,
+            tty: nil,
+            tool: "AskUserQuestion",
+            toolInput: [
+                "questions": AnyCodable([
+                    [
+                        "id": "module",
+                        "header": "方向",
+                        "question": "你想先处理哪个模块？",
+                        "multiSelect": true,
+                        "options": [
+                            ["label": "会话层"],
+                            ["label": "UI 层"]
+                        ]
+                    ]
+                ])
+            ],
+            toolUseId: "toolu_remote_2",
+            notificationType: nil,
+            message: nil,
+            ingress: .remoteBridge
+        )
+
+        store.record(
+            event: questionEvent,
+            decision: "answer",
+            reason: nil,
+            updatedInput: [
+                "answers": AnyCodable(["你想先处理哪个模块？": ["会话层", "UI 层"]])
+            ],
+            now: Date(timeIntervalSince1970: 100)
+        )
+
+        let replay = store.response(
+            for: duplicatePermissionEvent,
+            now: Date(timeIntervalSince1970: 101)
+        )
+
+        XCTAssertEqual(replay?.decision, "answer")
+        XCTAssertEqual(
+            replay?.updatedInput?["answers"]?.value as? [String: [String]],
+            ["你想先处理哪个模块？": ["会话层", "UI 层"]]
+        )
+    }
+
     func testCodeBuddyCLINotificationAnswerCanReplayToPermissionRequest() {
         var store = RecentInterventionResponseStore(ttl: 30)
 
