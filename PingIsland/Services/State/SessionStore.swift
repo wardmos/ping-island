@@ -1312,6 +1312,13 @@ actor SessionStore {
             return
         }
 
+        if previous.kind == .question,
+           reason == "Notification",
+           session.clientInfo.normalizedForClaudeRouting().kind == .claudeCode,
+           (session.clientInfo.profileID ?? "").isEmpty {
+            return
+        }
+
         let sessionIdPrefix = String(session.sessionId.prefix(8))
         let toolUseIdPrefix = String(previous.toolUseId.prefix(12))
         Self.logger.notice(
