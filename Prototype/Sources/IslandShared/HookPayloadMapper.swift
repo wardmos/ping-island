@@ -1599,6 +1599,10 @@ public enum HookPayloadMapper {
                 || isQoderWorkPermissionQuestionEvent(eventType: eventType, payload: payload)
         }
 
+        if clientKind == nil {
+            return eventType == "PermissionRequest" || eventType == "UserInputRequest"
+        }
+
         return eventType == "PreToolUse" || eventType == "UserInputRequest"
     }
 

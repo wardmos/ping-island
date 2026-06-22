@@ -164,6 +164,9 @@ struct HookEvent: Sendable {
             return false
         }
 
+        let isClaudeCodeClient = clientInfo.normalizedForClaudeRouting().kind == .claudeCode
+            && (clientInfo.profileID ?? "").isEmpty
+
         return isPermissionRequest
             || (event == "Notification" && status == "waiting_for_approval"
                 && clientInfo.isQwenCodeClient && notificationType == "permission_prompt")
@@ -178,6 +181,14 @@ struct HookEvent: Sendable {
                     && normalizedTool == "askuserquestion"
                     && toolInput?["questions"] != nil
                     && !isAnsweredAskUserQuestionEvent
+                    && !isClaudeCodeClient
+            )
+            || (
+                event == "PermissionRequest"
+                    && normalizedTool == "askuserquestion"
+                    && toolInput?["questions"] != nil
+                    && !isAnsweredAskUserQuestionEvent
+                    && isClaudeCodeClient
             )
             || (
                 event == "PreToolUse"
