@@ -486,6 +486,12 @@ struct NotchView: View {
             .onReceive(NotificationCenter.default.publisher(for: .pingIslandPresentNotchDetachmentHint)) { _ in
                 presentDetachmentHintIfNeeded(force: true)
             }
+            .onReceive(NotificationCenter.default.publisher(for: .pingIslandCollapseIslandShortcut)) { _ in
+                guard viewModel.status == .opened else { return }
+                withAnimation(viewModel.animation) {
+                    viewModel.notchClose()
+                }
+            }
             .onReceive(NotificationCenter.default.publisher(for: .pingIslandHookWalkthroughDemoShouldCloseNotch)) { _ in
                 closeDockedNotchForHookWalkthroughDemo()
             }
