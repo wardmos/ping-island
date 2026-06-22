@@ -265,7 +265,7 @@ class NotchViewModel: ObservableObject {
     private var hoverTimer: DispatchWorkItem?
     // Collapse the expanded island after a stretch of no interaction with it.
     private var inactivityTimer: DispatchWorkItem?
-    private let inactivityCollapseDelay: TimeInterval = 10
+    private let inactivityCollapseDelay: TimeInterval = 30
     // Keep hover previews feeling responsive without making incidental cursor
     // passes over the notch expand it too aggressively.
     private let defaultHoverActivationDelay: TimeInterval = 0.24
