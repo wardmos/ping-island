@@ -164,8 +164,7 @@ struct HookEvent: Sendable {
             return false
         }
 
-        let isClaudeCodeClient = clientInfo.normalizedForClaudeRouting().kind == .claudeCode
-            && (clientInfo.profileID ?? "").isEmpty
+        let isClaudeCodeClient = clientInfo.isPlainClaudeCodeRouting
 
         return isPermissionRequest
             || (event == "Notification" && status == "waiting_for_approval"
