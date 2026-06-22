@@ -334,15 +334,35 @@ struct AgentUsageDocument: Codable, Equatable, Sendable {
     var buckets: [String: AgentUsageDailyBucket]
     var seenToolEventIDs: Set<String>
     var codexTokenBaselines: [String: CodexTokenUsage]
+    var claudeTokenBaselines: [String: AgentUsageTokenTotals]
 
     nonisolated init(
         buckets: [String: AgentUsageDailyBucket] = [:],
         seenToolEventIDs: Set<String> = [],
-        codexTokenBaselines: [String: CodexTokenUsage] = [:]
+        codexTokenBaselines: [String: CodexTokenUsage] = [:],
+        claudeTokenBaselines: [String: AgentUsageTokenTotals] = [:]
     ) {
         self.buckets = buckets
         self.seenToolEventIDs = seenToolEventIDs
         self.codexTokenBaselines = codexTokenBaselines
+        self.claudeTokenBaselines = claudeTokenBaselines
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case buckets
+        case seenToolEventIDs
+        case codexTokenBaselines
+        case claudeTokenBaselines
+    }
+
+    // Decode every field leniently so introducing a new key never discards an
+    // existing on-disk usage history.
+    nonisolated init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        buckets = try container.decodeIfPresent([String: AgentUsageDailyBucket].self, forKey: .buckets) ?? [:]
+        seenToolEventIDs = try container.decodeIfPresent(Set<String>.self, forKey: .seenToolEventIDs) ?? []
+        codexTokenBaselines = try container.decodeIfPresent([String: CodexTokenUsage].self, forKey: .codexTokenBaselines) ?? [:]
+        claudeTokenBaselines = try container.decodeIfPresent([String: AgentUsageTokenTotals].self, forKey: .claudeTokenBaselines) ?? [:]
     }
 }
 
@@ -499,6 +519,51 @@ actor AgentUsageStore {
         }
         bucket.recordTokens(delta.totals)
         document.buckets[day] = bucket
+        pruneDocument(&document, now: now)
+        self.document = document
+        scheduleSave()
+    }
+
+    func recordClaudeTokenUsage(_ sessions: [ClaudeSessionTokenUsage], now: Date = Date()) async {
+        let positiveSessions = sessions.filter { $0.totals.resolvedTotal > 0 }
+        guard !positiveSessions.isEmpty else {
+            return
+        }
+
+        var document = await loadDocument()
+        var didChange = false
+
+        for session in positiveSessions {
+            let current = session.totals
+            let previous = document.claudeTokenBaselines[session.sessionID]
+            document.claudeTokenBaselines[session.sessionID] = current
+            didChange = true
+
+            // First sighting only establishes the baseline; pre-existing tokens
+            // are not back-filled, mirroring recordCodexUsageSnapshot.
+            guard let previous else {
+                continue
+            }
+
+            let delta = AgentUsageTokenTotals(
+                input: max(0, current.input - previous.input),
+                output: max(0, current.output - previous.output),
+                total: max(0, current.resolvedTotal - previous.resolvedTotal)
+            )
+            guard delta.resolvedTotal > 0 else {
+                continue
+            }
+
+            let captureDate = session.capturedAt ?? now
+            let day = Self.dayKey(for: captureDate, calendar: calendar)
+            var bucket = document.buckets[day] ?? AgentUsageDailyBucket(day: day)
+            bucket.recordTokens(delta)
+            document.buckets[day] = bucket
+        }
+
+        guard didChange else {
+            return
+        }
         pruneDocument(&document, now: now)
         self.document = document
         scheduleSave()

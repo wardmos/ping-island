@@ -325,6 +325,10 @@ class SessionMonitor: ObservableObject {
                 try? ClaudeUsageLoader.load()
             }.value
 
+            let claudeTokenSessions = await Task.detached(priority: .utility) {
+                (try? ClaudeTokenUsageLoader.load()) ?? []
+            }.value
+
             let codexSnapshot = await Task.detached(priority: .utility) {
                 try? CodexUsageLoader.load()
             }.value
@@ -333,6 +337,9 @@ class SessionMonitor: ObservableObject {
 
             if let claudeSnapshot {
                 UsageSnapshotCacheStore.saveClaude(claudeSnapshot)
+            }
+            if !claudeTokenSessions.isEmpty {
+                await AgentUsageStore.shared.recordClaudeTokenUsage(claudeTokenSessions)
             }
             if let codexSnapshot {
                 UsageSnapshotCacheStore.saveCodex(codexSnapshot)

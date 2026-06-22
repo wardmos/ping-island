@@ -180,4 +180,42 @@ final class AgentUsageAnalyticsTests: XCTestCase {
         XCTAssertEqual(snapshot.tokenTotals, AgentUsageTokenTotals(input: 75, output: 30, total: 105))
         XCTAssertEqual(snapshot.sessionCount, 1)
     }
+
+    func testRecordClaudeTokenUsageStoresOnlyPositiveDeltas() async throws {
+        let directoryURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ping-island-agent-usage-\(UUID().uuidString)", isDirectory: true)
+        let fileURL = directoryURL.appendingPathComponent("usage.json")
+        defer {
+            try? FileManager.default.removeItem(at: directoryURL)
+        }
+
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let store = AgentUsageStore(fileURL: fileURL, calendar: calendar)
+        let capturedAt = Date(timeIntervalSince1970: 1_775_520_000)
+        let sessionID = "ba553837-491d-45fc-b868-3b23b13e3cef"
+
+        // First sighting only establishes a baseline.
+        await store.recordClaudeTokenUsage([
+            ClaudeSessionTokenUsage(
+                sessionID: sessionID,
+                capturedAt: capturedAt,
+                totals: AgentUsageTokenTotals(input: 1_000, output: 200, total: 1_200)
+            )
+        ])
+        let baselineSnapshot = await store.snapshot(range: .today, now: capturedAt)
+        XCTAssertEqual(baselineSnapshot.tokenTotals, AgentUsageTokenTotals())
+
+        // Subsequent growth records only the delta.
+        await store.recordClaudeTokenUsage([
+            ClaudeSessionTokenUsage(
+                sessionID: sessionID,
+                capturedAt: capturedAt,
+                totals: AgentUsageTokenTotals(input: 1_500, output: 260, total: 1_760)
+            )
+        ])
+
+        let snapshot = await store.snapshot(range: .today, now: capturedAt)
+        XCTAssertEqual(snapshot.tokenTotals, AgentUsageTokenTotals(input: 500, output: 60, total: 560))
+    }
 }
