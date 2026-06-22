@@ -31,6 +31,8 @@ class SessionMonitor: ObservableObject {
     private let shouldRefreshUsage: Bool
     private var questionDraftCache = SessionQuestionDraftCache()
     private var telemetryPendingAttentionSessionIDs: Set<String> = []
+    private var remoteInterventionResponses = RecentInterventionResponseStore()
+    private var pendingRemoteQuestionEvents: [String: HookEvent] = [:]
 
     init(
         runtimeCoordinator: any RuntimeCoordinating = RuntimeCoordinator.shared,
@@ -157,9 +159,29 @@ class SessionMonitor: ObservableObject {
             effectiveEvent = event
         }
 
+        // Remote events skip HookSocketServer's AskUserQuestion replay, so
+        // resolve the duplicate re-fire from cache here instead of re-prompting.
+        if effectiveEvent.ingress == .remoteBridge,
+           let replay = remoteInterventionResponses.response(for: effectiveEvent),
+           let toolUseId = effectiveEvent.toolUseId {
+            RemoteConnectorManager.shared.respondToIntervention(
+                toolUseId: toolUseId,
+                decision: replay.decision,
+                updatedInput: replay.updatedInput?.mapValues { $0.value },
+                reason: replay.reason
+            )
+            return
+        }
+
         let shouldAutoApprovePermission = await Self.shouldAutoApproveClaudePermission(for: effectiveEvent)
 
         await SessionStore.shared.process(.hookReceived(effectiveEvent))
+
+        // Stash after the session exists so updateFromSessions' prune can't drop it early.
+        if effectiveEvent.ingress == .remoteBridge,
+           RecentInterventionResponseStore.cacheKey(for: effectiveEvent) != nil {
+            pendingRemoteQuestionEvents[effectiveEvent.sessionId] = effectiveEvent
+        }
 
         if shouldAutoApprovePermission,
            let approvedToolUseId = await Self.resolvePendingApprovalToolUseId(for: effectiveEvent.sessionId, fallback: effectiveEvent.toolUseId) {
@@ -629,6 +651,14 @@ class SessionMonitor: ObservableObject {
                     decision: "answer",
                     updatedInput: updatedInput
                 )
+                if let questionEvent = pendingRemoteQuestionEvents.removeValue(forKey: sessionId) {
+                    remoteInterventionResponses.record(
+                        event: questionEvent,
+                        decision: "answer",
+                        reason: nil,
+                        updatedInput: updatedInput.mapValues { AnyCodable($0) }
+                    )
+                }
             } else {
                 HookSocketServer.shared.respondToIntervention(
                     toolUseId: toolUseId,
@@ -815,6 +845,12 @@ class SessionMonitor: ObservableObject {
     private func updateFromSessions(_ sessions: [SessionState]) {
         guard sessions != allSessions else { return }
         allSessions = sessions
+        if !pendingRemoteQuestionEvents.isEmpty {
+            let liveSessionIDs = Set(sessions.map(\.sessionId))
+            pendingRemoteQuestionEvents = pendingRemoteQuestionEvents.filter {
+                liveSessionIDs.contains($0.key)
+            }
+        }
         refreshVisibleSessions()
     }
 

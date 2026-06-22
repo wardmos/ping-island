@@ -1312,6 +1312,10 @@ actor SessionStore {
             return
         }
 
+        if reason == "Notification" {
+            return
+        }
+
         let sessionIdPrefix = String(session.sessionId.prefix(8))
         let toolUseIdPrefix = String(previous.toolUseId.prefix(12))
         Self.logger.notice(
@@ -2286,6 +2290,9 @@ actor SessionStore {
             return true
         }
         if event.isAskUserQuestionRequest {
+            return false
+        }
+        if event.event == "Notification" {
             return false
         }
         return newPhase != .waitingForInput
@@ -4586,6 +4593,10 @@ actor SessionStore {
         if profileID == "qoderwork"
             || bundleIdentifier == "com.qoder.work" {
             return true
+        }
+
+        if normalizedClientInfo.kind == .claudeCode, (profileID ?? "").isEmpty {
+            return false
         }
 
         return normalizedTool == "askuserquestion"
