@@ -581,6 +581,18 @@ struct SessionClientInfo: Codable, Equatable, Sendable {
         return nil
     }
 
+    nonisolated var isPlainClaudeCodeRouting: Bool {
+        let normalized = normalizedForClaudeRouting()
+        guard normalized.kind == .claudeCode else { return false }
+        let profile = normalized.profileID?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased() ?? ""
+        return profile.isEmpty
+            || profile == "claude-code"
+            || profile == "claude_code"
+            || profile == "claude"
+    }
+
     nonisolated func normalizedForClaudeRouting() -> SessionClientInfo {
         var normalized = self
 

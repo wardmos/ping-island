@@ -281,8 +281,7 @@ extension HookEvent {
                 && !(questionPayloads?.isEmpty ?? true)
         }
 
-        if clientInfo.normalizedForClaudeRouting().kind == .claudeCode,
-           (clientInfo.profileID ?? "").isEmpty {
+        if clientInfo.isPlainClaudeCodeRouting {
             return event == "PermissionRequest"
                 && Self.questionToolNames.contains(normalizedToolNameForIntervention ?? "")
                 && !(questionPayloads?.isEmpty ?? true)
