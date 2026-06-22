@@ -1312,8 +1312,7 @@ actor SessionStore {
             return
         }
 
-        if previous.kind == .question,
-           reason == "Notification",
+        if reason == "Notification",
            session.clientInfo.normalizedForClaudeRouting().kind == .claudeCode,
            (session.clientInfo.profileID ?? "").isEmpty {
             return
