@@ -281,6 +281,13 @@ extension HookEvent {
                 && !(questionPayloads?.isEmpty ?? true)
         }
 
+        if clientInfo.normalizedForClaudeRouting().kind == .claudeCode,
+           (clientInfo.profileID ?? "").isEmpty {
+            return event == "PermissionRequest"
+                && Self.questionToolNames.contains(normalizedToolNameForIntervention ?? "")
+                && !(questionPayloads?.isEmpty ?? true)
+        }
+
         return event == "PreToolUse"
             && Self.questionToolNames.contains(normalizedToolNameForIntervention ?? "")
             && !(questionPayloads?.isEmpty ?? true)
