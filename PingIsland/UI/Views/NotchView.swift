@@ -6,6 +6,7 @@
 //
 
 import AppKit
+import Carbon.HIToolbox
 import CoreGraphics
 import SwiftUI
 
@@ -44,6 +45,7 @@ struct NotchView: View {
     @State private var previousWaitingForInputIds: Set<String> = []
     @State private var waitingForInputTimestamps: [String: Date] = [:]  // sessionId -> when it entered waitingForInput
     @State private var isVisible: Bool = false
+    @State private var escapeKeyMonitor: Any?
     @State private var isHovering: Bool = false
     @State private var isBouncing: Bool = false
     @State private var hasPrimedSoundTransitions: Bool = false
@@ -358,9 +360,11 @@ struct NotchView: View {
                 handleProcessingChange()
                 primeStartupPresentationState(sessionMonitor.instances)
                 scheduleDetachmentHintPresentationIfNeeded(delay: Self.startupDetachmentHintDelay)
+                installEscapeKeyMonitorIfNeeded()
             }
             .onDisappear {
                 cancelScheduledDetachmentHintPresentation()
+                removeEscapeKeyMonitor()
             }
             .onChange(of: viewModel.status) { oldStatus, newStatus in
                 handleStatusChange(from: oldStatus, to: newStatus)
@@ -868,6 +872,30 @@ struct NotchView: View {
             activityCoordinator.hideActivity()
             isVisible = true
         }
+    }
+
+    private func installEscapeKeyMonitorIfNeeded() {
+        guard escapeKeyMonitor == nil else { return }
+
+        escapeKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) { event in
+            handleEscapeKeyDown(event) ? nil : event
+        }
+    }
+
+    private func removeEscapeKeyMonitor() {
+        guard let escapeKeyMonitor else { return }
+        NSEvent.removeMonitor(escapeKeyMonitor)
+        self.escapeKeyMonitor = nil
+    }
+
+    /// Collapses the island when ESC is pressed while it is expanded.
+    private func handleEscapeKeyDown(_ event: NSEvent) -> Bool {
+        guard event.keyCode == UInt16(kVK_Escape) else { return false }
+        guard viewModel.status == .opened else { return false }
+        guard NSApp.keyWindow is NotchPanel else { return false }
+
+        viewModel.notchClose()
+        return true
     }
 
     private func handleStatusChange(from oldStatus: NotchStatus, to newStatus: NotchStatus) {
