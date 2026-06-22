@@ -4588,6 +4588,10 @@ actor SessionStore {
             return true
         }
 
+        if normalizedClientInfo.kind == .claudeCode, (profileID ?? "").isEmpty {
+            return false
+        }
+
         return normalizedTool == "askuserquestion"
     }
 
