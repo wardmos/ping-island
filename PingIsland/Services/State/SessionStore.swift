@@ -2292,6 +2292,9 @@ actor SessionStore {
         if event.isAskUserQuestionRequest {
             return false
         }
+        if event.event == "Notification" {
+            return false
+        }
         return newPhase != .waitingForInput
     }
 
