@@ -109,6 +109,13 @@ struct IslandBridgeMain {
                 let socketPath = environment["ISLAND_SOCKET_PATH"] ?? "/tmp/island.sock"
                 try SocketClient.sendHealthCheck(socketPath: socketPath)
                 FileHandle.standardOutput.write(Data("ok\n".utf8))
+            case .scanClaudeTokens:
+                let items = ClaudeTokenUsageScanner.scan()
+                let encoder = JSONEncoder()
+                encoder.outputFormatting = [.sortedKeys]
+                let data = try encoder.encode(items)
+                FileHandle.standardOutput.write(data)
+                FileHandle.standardOutput.write(Data("\n".utf8))
             }
         } catch {
             FileHandle.standardError.write(Data("PingIslandBridge error: \(error.localizedDescription)\n".utf8))
@@ -649,6 +656,7 @@ private enum BridgeRuntimeMode: String {
     case remoteAgentService = "remote-agent-service"
     case remoteAgentAttach = "remote-agent-attach"
     case healthCheck = "health-check"
+    case scanClaudeTokens = "scan-claude-tokens"
 }
 
 private enum SocketClient {

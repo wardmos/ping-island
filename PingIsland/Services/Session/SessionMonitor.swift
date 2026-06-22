@@ -349,6 +349,10 @@ class SessionMonitor: ObservableObject {
             self.claudeUsageSnapshot = claudeSnapshot ?? cachedClaudeSnapshot
             self.codexUsageSnapshot = codexSnapshot ?? cachedCodexSnapshot
             self.syncCodexThreadDiscovery(using: self.codexUsageSnapshot)
+
+            // Local scan above only sees the Mac's transcripts; pull Claude token
+            // usage from connected remote hosts too.
+            await RemoteConnectorManager.shared.refreshRemoteClaudeTokenUsage()
         }
     }
 
