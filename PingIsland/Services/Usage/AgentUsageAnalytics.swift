@@ -31,27 +31,66 @@ enum AgentUsageRange: String, CaseIterable, Identifiable, Sendable {
 }
 
 struct AgentUsageTokenTotals: Codable, Equatable, Sendable {
+    /// Fresh (uncached) prompt tokens.
     var input: Int
+    /// Tokens written into the prompt cache (`cache_creation_input_tokens`).
+    var cacheWrite: Int
+    /// Tokens served from the prompt cache (`cache_read_input_tokens`).
+    var cacheRead: Int
     var output: Int
     var total: Int
 
-    nonisolated init(input: Int = 0, output: Int = 0, total: Int = 0) {
+    nonisolated init(
+        input: Int = 0,
+        cacheWrite: Int = 0,
+        cacheRead: Int = 0,
+        output: Int = 0,
+        total: Int = 0
+    ) {
         self.input = max(0, input)
+        self.cacheWrite = max(0, cacheWrite)
+        self.cacheRead = max(0, cacheRead)
         self.output = max(0, output)
         self.total = max(0, total)
     }
 
+    private enum CodingKeys: String, CodingKey {
+        case input
+        case cacheWrite
+        case cacheRead
+        case output
+        case total
+    }
+
+    // Decode leniently so adding the cache fields never discards buckets that
+    // were written before they existed.
+    nonisolated init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        input = max(0, try container.decodeIfPresent(Int.self, forKey: .input) ?? 0)
+        cacheWrite = max(0, try container.decodeIfPresent(Int.self, forKey: .cacheWrite) ?? 0)
+        cacheRead = max(0, try container.decodeIfPresent(Int.self, forKey: .cacheRead) ?? 0)
+        output = max(0, try container.decodeIfPresent(Int.self, forKey: .output) ?? 0)
+        total = max(0, try container.decodeIfPresent(Int.self, forKey: .total) ?? 0)
+    }
+
     nonisolated mutating func add(_ other: AgentUsageTokenTotals) {
         input += max(0, other.input)
+        cacheWrite += max(0, other.cacheWrite)
+        cacheRead += max(0, other.cacheRead)
         output += max(0, other.output)
         total += max(0, other.total)
+    }
+
+    /// Combined cache traffic (write + read), useful for a single "cache" pill.
+    nonisolated var cache: Int {
+        cacheWrite + cacheRead
     }
 
     nonisolated var resolvedTotal: Int {
         if total > 0 {
             return total
         }
-        return input + output
+        return input + cacheWrite + cacheRead + output
     }
 }
 
@@ -110,18 +149,26 @@ struct AgentUsageSpendSummary: Equatable, Sendable {
 
 struct AgentUsageTokenPricing: Equatable, Sendable {
     let inputUSDPerMillion: Double
+    let cacheWriteUSDPerMillion: Double
+    let cacheReadUSDPerMillion: Double
     let outputUSDPerMillion: Double
     let label: String
 
     nonisolated func estimateUSD(for totals: AgentUsageTokenTotals) -> Double {
         (Double(totals.input) / 1_000_000 * inputUSDPerMillion)
+            + (Double(totals.cacheWrite) / 1_000_000 * cacheWriteUSDPerMillion)
+            + (Double(totals.cacheRead) / 1_000_000 * cacheReadUSDPerMillion)
             + (Double(totals.output) / 1_000_000 * outputUSDPerMillion)
     }
 }
 
 enum AgentUsageCostEstimator {
+    // Cache writes bill ~1.25x and cache reads ~0.1x the fresh-input rate, so the
+    // dominant cache-read volume is not priced as full input.
     nonisolated static let blendedCodexClaudePricing = AgentUsageTokenPricing(
         inputUSDPerMillion: 2.375,
+        cacheWriteUSDPerMillion: 2.96875,
+        cacheReadUSDPerMillion: 0.2375,
         outputUSDPerMillion: 14.50,
         label: "Codex / Claude Code 均价"
     )
@@ -547,6 +594,8 @@ actor AgentUsageStore {
 
             let delta = AgentUsageTokenTotals(
                 input: max(0, current.input - previous.input),
+                cacheWrite: max(0, current.cacheWrite - previous.cacheWrite),
+                cacheRead: max(0, current.cacheRead - previous.cacheRead),
                 output: max(0, current.output - previous.output),
                 total: max(0, current.resolvedTotal - previous.resolvedTotal)
             )

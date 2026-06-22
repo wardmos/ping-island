@@ -45,7 +45,10 @@ final class ClaudeTokenUsageLoaderTests: XCTestCase {
         XCTAssertEqual(sessions.count, 1)
         let session = try XCTUnwrap(sessions.first)
         XCTAssertEqual(session.sessionID, sessionID)
-        XCTAssertEqual(session.totals, AgentUsageTokenTotals(input: 3_310, output: 130, total: 3_440))
+        XCTAssertEqual(
+            session.totals,
+            AgentUsageTokenTotals(input: 300, cacheWrite: 10, cacheRead: 3_000, output: 130, total: 3_440)
+        )
         XCTAssertEqual(session.capturedAt, isoDate("2026-06-21T16:11:30.500Z"))
     }
 
@@ -73,7 +76,10 @@ final class ClaudeTokenUsageLoaderTests: XCTestCase {
 
         let sessions = try ClaudeTokenUsageLoader.load(fromRootURL: rootURL)
 
-        XCTAssertEqual(sessions.first?.totals, AgentUsageTokenTotals(input: 100, output: 25, total: 125))
+        XCTAssertEqual(
+            sessions.first?.totals,
+            AgentUsageTokenTotals(input: 100, cacheWrite: 0, cacheRead: 0, output: 25, total: 125)
+        )
     }
 
     func testLoadSkipsTranscriptsLargerThanMaxBytes() throws {

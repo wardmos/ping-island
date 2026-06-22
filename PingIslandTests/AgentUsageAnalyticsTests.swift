@@ -200,22 +200,25 @@ final class AgentUsageAnalyticsTests: XCTestCase {
             ClaudeSessionTokenUsage(
                 sessionID: sessionID,
                 capturedAt: capturedAt,
-                totals: AgentUsageTokenTotals(input: 1_000, output: 200, total: 1_200)
+                totals: AgentUsageTokenTotals(input: 1_000, cacheWrite: 100, cacheRead: 5_000, output: 200, total: 6_300)
             )
         ])
         let baselineSnapshot = await store.snapshot(range: .today, now: capturedAt)
         XCTAssertEqual(baselineSnapshot.tokenTotals, AgentUsageTokenTotals())
 
-        // Subsequent growth records only the delta.
+        // Subsequent growth records only the delta, cache traffic included.
         await store.recordClaudeTokenUsage([
             ClaudeSessionTokenUsage(
                 sessionID: sessionID,
                 capturedAt: capturedAt,
-                totals: AgentUsageTokenTotals(input: 1_500, output: 260, total: 1_760)
+                totals: AgentUsageTokenTotals(input: 1_500, cacheWrite: 150, cacheRead: 8_000, output: 260, total: 9_910)
             )
         ])
 
         let snapshot = await store.snapshot(range: .today, now: capturedAt)
-        XCTAssertEqual(snapshot.tokenTotals, AgentUsageTokenTotals(input: 500, output: 60, total: 560))
+        XCTAssertEqual(
+            snapshot.tokenTotals,
+            AgentUsageTokenTotals(input: 500, cacheWrite: 50, cacheRead: 3_000, output: 60, total: 3_610)
+        )
     }
 }

@@ -155,13 +155,15 @@ enum ClaudeTokenUsageLoader {
             return nil
         }
 
-        // Cache reads/writes are real tokens processed, so they count toward the
-        // input side of total consumption.
-        let totalInput = inputTokens + cacheCreationTokens + cacheReadTokens
+        // Keep cache traffic in its own buckets: cache reads dominate volume but
+        // bill far below fresh input, so lumping them into `input` would wildly
+        // overstate the cost estimate.
         let totals = AgentUsageTokenTotals(
-            input: totalInput,
+            input: inputTokens,
+            cacheWrite: cacheCreationTokens,
+            cacheRead: cacheReadTokens,
             output: outputTokens,
-            total: totalInput + outputTokens
+            total: inputTokens + cacheCreationTokens + cacheReadTokens + outputTokens
         )
         guard totals.resolvedTotal > 0 else {
             return nil
