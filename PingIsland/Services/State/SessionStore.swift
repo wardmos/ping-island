@@ -1312,9 +1312,7 @@ actor SessionStore {
             return
         }
 
-        if reason == "Notification",
-           session.clientInfo.normalizedForClaudeRouting().kind == .claudeCode,
-           (session.clientInfo.profileID ?? "").isEmpty {
+        if reason == "Notification" {
             return
         }
 
