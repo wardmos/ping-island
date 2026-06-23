@@ -14,7 +14,7 @@ enum ClaudeTokenUsageLoader {
     nonisolated static let defaultRootURL = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent(".claude/projects", isDirectory: true)
 
-    private nonisolated static let defaultCandidateScanLimit = 48
+    private nonisolated static let defaultCandidateScanLimit = 4096
     private nonisolated static let defaultMaxBytesPerFile = 64 * 1024 * 1024
     private nonisolated static let cacheLock = NSLock()
     nonisolated(unsafe) private static var fileCache: [String: ClaudeSessionTokenUsage] = [:]

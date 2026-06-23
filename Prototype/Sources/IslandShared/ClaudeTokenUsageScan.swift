@@ -44,7 +44,7 @@ public enum ClaudeTokenUsageScanner {
     public static func scan(
         fromRootURL rootURL: URL = defaultRootURL,
         fileManager: FileManager = .default,
-        candidateScanLimit: Int = 48,
+        candidateScanLimit: Int = 4096,
         maxBytesPerFile: Int = 64 * 1024 * 1024
     ) -> [ClaudeTokenUsageScanItem] {
         guard fileManager.fileExists(atPath: rootURL.path),
