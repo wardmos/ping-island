@@ -180,4 +180,102 @@ final class AgentUsageAnalyticsTests: XCTestCase {
         XCTAssertEqual(snapshot.tokenTotals, AgentUsageTokenTotals(input: 75, output: 30, total: 105))
         XCTAssertEqual(snapshot.sessionCount, 1)
     }
+
+    func testRecordClaudeTokenUsageStoresOnlyPositiveDeltas() async throws {
+        let directoryURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ping-island-agent-usage-\(UUID().uuidString)", isDirectory: true)
+        let fileURL = directoryURL.appendingPathComponent("usage.json")
+        defer {
+            try? FileManager.default.removeItem(at: directoryURL)
+        }
+
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let store = AgentUsageStore(fileURL: fileURL, calendar: calendar)
+        let capturedAt = Date(timeIntervalSince1970: 1_775_520_000)
+        let sessionID = "ba553837-491d-45fc-b868-3b23b13e3cef"
+
+        // First sighting only establishes a baseline.
+        await store.recordClaudeTokenUsage([
+            ClaudeSessionTokenUsage(
+                sessionID: sessionID,
+                capturedAt: capturedAt,
+                totals: AgentUsageTokenTotals(input: 1_000, cacheWrite: 100, cacheRead: 5_000, output: 200, total: 6_300)
+            )
+        ])
+        let baselineSnapshot = await store.snapshot(range: .today, now: capturedAt)
+        XCTAssertEqual(baselineSnapshot.tokenTotals, AgentUsageTokenTotals())
+
+        // Subsequent growth records only the delta, cache traffic included.
+        await store.recordClaudeTokenUsage([
+            ClaudeSessionTokenUsage(
+                sessionID: sessionID,
+                capturedAt: capturedAt,
+                totals: AgentUsageTokenTotals(input: 1_500, cacheWrite: 150, cacheRead: 8_000, output: 260, total: 9_910)
+            )
+        ])
+
+        let snapshot = await store.snapshot(range: .today, now: capturedAt)
+        XCTAssertEqual(
+            snapshot.tokenTotals,
+            AgentUsageTokenTotals(input: 500, cacheWrite: 50, cacheRead: 3_000, output: 60, total: 3_610)
+        )
+    }
+
+    func testRecordClaudeTokenUsageSeparatesSourcesWithSameSessionID() async throws {
+        let directoryURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ping-island-agent-usage-\(UUID().uuidString)", isDirectory: true)
+        let fileURL = directoryURL.appendingPathComponent("usage.json")
+        defer {
+            try? FileManager.default.removeItem(at: directoryURL)
+        }
+
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let store = AgentUsageStore(fileURL: fileURL, calendar: calendar)
+        let capturedAt = Date(timeIntervalSince1970: 1_775_520_000)
+        let sessionID = "agent-session"
+
+        await store.recordClaudeTokenUsage([
+            ClaudeSessionTokenUsage(
+                sessionID: sessionID,
+                sourceFilePath: "remote:endpoint-a:/remote/user/.claude/projects/project-a/agent-session.jsonl",
+                capturedAt: capturedAt,
+                fileSize: 128,
+                contentHash: "hash-a1",
+                totals: AgentUsageTokenTotals(input: 100, output: 20, total: 120)
+            ),
+            ClaudeSessionTokenUsage(
+                sessionID: sessionID,
+                sourceFilePath: "remote:endpoint-a:/remote/user/.claude/projects/project-b/agent-session.jsonl",
+                capturedAt: capturedAt,
+                fileSize: 128,
+                contentHash: "hash-b1",
+                totals: AgentUsageTokenTotals(input: 200, output: 40, total: 240)
+            ),
+        ])
+
+        await store.recordClaudeTokenUsage([
+            ClaudeSessionTokenUsage(
+                sessionID: sessionID,
+                sourceFilePath: "remote:endpoint-a:/remote/user/.claude/projects/project-a/agent-session.jsonl",
+                capturedAt: capturedAt,
+                fileSize: 256,
+                contentHash: "hash-a2",
+                totals: AgentUsageTokenTotals(input: 150, output: 30, total: 180)
+            ),
+            ClaudeSessionTokenUsage(
+                sessionID: sessionID,
+                sourceFilePath: "remote:endpoint-a:/remote/user/.claude/projects/project-b/agent-session.jsonl",
+                capturedAt: capturedAt,
+                fileSize: 256,
+                contentHash: "hash-b2",
+                totals: AgentUsageTokenTotals(input: 260, output: 55, total: 315)
+            ),
+        ])
+
+        let snapshot = await store.snapshot(range: .today, now: capturedAt)
+        XCTAssertEqual(snapshot.tokenTotals, AgentUsageTokenTotals(input: 110, output: 25, total: 135))
+        XCTAssertEqual(snapshot.sessionCount, 1)
+    }
 }
