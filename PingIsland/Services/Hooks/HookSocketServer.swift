@@ -163,6 +163,7 @@ struct HookEvent: Sendable {
         if suppressInAppPrompt, !isPermissionRequest {
             return false
         }
+        let isPlainClaudeCodeClient = clientInfo.isPlainClaudeCodeRouting
 
         return isPermissionRequest
             || (event == "Notification" && status == "waiting_for_approval"
@@ -178,6 +179,14 @@ struct HookEvent: Sendable {
                     && normalizedTool == "askuserquestion"
                     && toolInput?["questions"] != nil
                     && !isAnsweredAskUserQuestionEvent
+                    && !isPlainClaudeCodeClient
+            )
+            || (
+                event == "PermissionRequest"
+                    && normalizedTool == "askuserquestion"
+                    && toolInput?["questions"] != nil
+                    && !isAnsweredAskUserQuestionEvent
+                    && isPlainClaudeCodeClient
             )
             || (
                 event == "PreToolUse"
