@@ -43,4 +43,25 @@ final class HookEventResponseRoutingTests: XCTestCase {
 
         XCTAssertFalse(event.expectsResponse)
     }
+
+    func testTerminalRoutedPermissionRequestAskUserQuestionDoesNotExpectResponse() {
+        let event = HookEvent(
+            sessionId: "claude-session",
+            cwd: "/tmp/project",
+            event: "PermissionRequest",
+            status: "waiting_for_approval",
+            provider: .claude,
+            clientInfo: SessionClientInfo(kind: .claudeCode, profileID: "claude_code", name: "Claude Code"),
+            pid: nil,
+            tty: nil,
+            tool: "AskUserQuestion",
+            toolInput: ["questions": AnyCodable([["question": "Pick one"]])],
+            toolUseId: "question-tool",
+            notificationType: nil,
+            message: nil,
+            suppressInAppPrompt: true
+        )
+
+        XCTAssertFalse(event.expectsResponse)
+    }
 }

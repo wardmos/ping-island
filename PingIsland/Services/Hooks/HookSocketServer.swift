@@ -160,10 +160,15 @@ struct HookEvent: Sendable {
             .replacingOccurrences(of: "_", with: "")
             .replacingOccurrences(of: "-", with: "")
         let isPermissionRequest = event == "PermissionRequest" && status == "waiting_for_approval"
-        if suppressInAppPrompt, !isPermissionRequest {
-            return false
-        }
         let isPlainClaudeCodeClient = clientInfo.isPlainClaudeCodeRouting
+        let isPlainClaudeQuestionPermissionRequest = isPermissionRequest
+            && normalizedTool == "askuserquestion"
+            && toolInput?["questions"] != nil
+            && !isAnsweredAskUserQuestionEvent
+            && isPlainClaudeCodeClient
+        if suppressInAppPrompt {
+            return isPermissionRequest && !isPlainClaudeQuestionPermissionRequest
+        }
 
         return isPermissionRequest
             || (event == "Notification" && status == "waiting_for_approval"
