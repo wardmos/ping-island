@@ -4,6 +4,14 @@ on:
   push:
     branches:
       - release/personal
+    paths:
+      - ".github/workflows/personal-unsigned-dmg.yml"
+      - "Config/**"
+      - "PingIsland/**"
+      - "PingIsland.xcodeproj/**"
+      - "Prototype/**"
+      - "docs/images/**"
+      - "scripts/**"
   workflow_dispatch:
     inputs:
       ref:
@@ -34,15 +42,26 @@ jobs:
       - name: Show toolchain
         run: xcodebuild -version
 
-      - name: Build unsigned DMG and ZIP
+      - name: Resolve package commit suffix
+        id: package
+        env:
+          SOURCE_SHA: ${{ github.sha }}
+        run: |
+          short_sha="${SOURCE_SHA:0:7}"
+          echo "suffix=-$short_sha" >> "$GITHUB_OUTPUT"
+
+      - name: Build unsigned DMG
+        env:
+          PING_ISLAND_PACKAGE_SUFFIX: ${{ steps.package.outputs.suffix }}
+          PING_ISLAND_DMG_STYLE: plain
+          COMPILER_INDEX_STORE_ENABLE: NO
         run: bash scripts/package-unsigned.sh
 
       - name: Upload packages
         uses: actions/upload-artifact@v4
         with:
-          name: ping-island-unsigned
+          name: ping-island-unsigned${{ steps.package.outputs.suffix }}
           path: |
             releases/unsigned/*.dmg
-            releases/unsigned/*.zip
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 7

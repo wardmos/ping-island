@@ -12,6 +12,8 @@ STAGING_DIR="$BUILD_DIR/dmg-staging"
 RELEASE_DIR="$PROJECT_DIR/releases/unsigned"
 DMG_BACKGROUND_SOURCE="${PING_ISLAND_DMG_BACKGROUND_SOURCE:-$PROJECT_DIR/docs/images/ping-island-dmg-installer-background.png}"
 DMG_LOGO_SOURCE="${PING_ISLAND_DMG_LOGO_SOURCE:-$PROJECT_DIR/docs/images/ping-island-icon-transparent.svg}"
+PACKAGE_SUFFIX="${PING_ISLAND_PACKAGE_SUFFIX:-}"
+DMG_STYLE="${PING_ISLAND_DMG_STYLE:-styled}"
 
 APP_BUNDLE_NAME="Ping Island.app"
 APP_PRODUCT_NAME="PingIsland"
@@ -66,6 +68,7 @@ if ! xcodebuild \
     -configuration Release \
     -derivedDataPath "$DERIVED_DATA_PATH" \
     CODE_SIGN_IDENTITY=- \
+    COMPILER_INDEX_STORE_ENABLE="${COMPILER_INDEX_STORE_ENABLE:-YES}" \
     build; then
     echo ""
     echo "Release optimizer crashed. Retrying with stable compiler settings..."
@@ -77,6 +80,7 @@ if ! xcodebuild \
         -configuration Release \
         -derivedDataPath "$DERIVED_DATA_PATH" \
         CODE_SIGN_IDENTITY=- \
+        COMPILER_INDEX_STORE_ENABLE="${COMPILER_INDEX_STORE_ENABLE:-YES}" \
         SWIFT_OPTIMIZATION_LEVEL=-Onone \
         SWIFT_COMPILATION_MODE=singlefile \
         build
@@ -115,25 +119,34 @@ codesign --verify --deep --strict --verbose=2 "$APP_PATH"
 VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$APP_PATH/Contents/Info.plist")
 BUILD=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$APP_PATH/Contents/Info.plist")
 
-ZIP_PATH="$RELEASE_DIR/$APP_PRODUCT_NAME-$VERSION-$BUILD_MODE_LABEL-unsigned.zip"
-DMG_PATH="$RELEASE_DIR/$APP_PRODUCT_NAME-$VERSION-$BUILD_MODE_LABEL-unsigned.dmg"
+DMG_PATH="$RELEASE_DIR/$APP_PRODUCT_NAME-$VERSION-$BUILD_MODE_LABEL-unsigned$PACKAGE_SUFFIX.dmg"
 
-rm -f "$ZIP_PATH" "$DMG_PATH"
+rm -f "$DMG_PATH"
 rm -rf "$STAGING_DIR"
 
-echo ""
-echo "Creating ZIP..."
-ditto -c -k --keepParent "$APP_PATH" "$ZIP_PATH"
-
 echo "Creating DMG..."
-create_styled_dmg "$APP_PATH" "$DMG_PATH" "Ping Island" "$STAGING_DIR" "$PROJECT_DIR"
+if [ "$DMG_STYLE" = "plain" ]; then
+    rm -rf "$STAGING_DIR"
+    mkdir -p "$STAGING_DIR"
+    cp -R "$APP_PATH" "$STAGING_DIR/"
+    ln -s /Applications "$STAGING_DIR/Applications"
+    hdiutil create \
+        -volname "Ping Island" \
+        -srcfolder "$STAGING_DIR" \
+        -format UDZO \
+        -ov \
+        "$DMG_PATH" >/dev/null
+    rm -rf "$STAGING_DIR"
+else
+    create_styled_dmg "$APP_PATH" "$DMG_PATH" "Ping Island" "$STAGING_DIR" "$PROJECT_DIR"
+fi
 
 echo ""
 echo "=== Unsigned Package Ready ==="
 echo "Version: $VERSION ($BUILD)"
 echo "Build mode: $BUILD_MODE_LABEL"
+echo "DMG style: $DMG_STYLE"
 echo "App: $APP_PATH"
-echo "ZIP: $ZIP_PATH"
 echo "DMG: $DMG_PATH"
 echo ""
 echo "Note: This build is for local testing only."
