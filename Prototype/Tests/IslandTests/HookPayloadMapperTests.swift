@@ -78,6 +78,34 @@ func routePromptsToTerminalDropsAskUserQuestionIntervention() throws {
 }
 
 @Test
+func routePromptsToTerminalDropsPermissionRequestAskUserQuestionIntervention() throws {
+    let payload = """
+    {
+      "hook_event_name": "PermissionRequest",
+      "tool_name": "AskUserQuestion",
+      "tool_input": {
+        "questions": [
+          {"id": "q1", "question": "Pick one", "options": ["A", "B"]}
+        ]
+      },
+      "session_id": "abc123"
+    }
+    """.data(using: .utf8)!
+
+    let envelope = HookPayloadMapper.makeEnvelope(
+        source: .claude,
+        arguments: ["island-bridge", "--source", "claude"],
+        environment: ["TERM_PROGRAM": "iTerm.app", "PWD": "/tmp/demo"],
+        stdinData: payload,
+        runtimeConfig: BridgeRuntimeConfig(routePromptsToTerminal: true)
+    )
+
+    #expect(envelope.intervention == nil)
+    #expect(envelope.expectsResponse == false)
+    #expect(envelope.metadata["suppress_in_app_prompt"] == "true")
+}
+
+@Test
 func bridgeRuntimeConfigLoadsFromEnvironmentPath() async throws {
     try await withTemporaryDirectory { directory in
         let configURL = directory.appending(path: "bridge-config.json")
@@ -2073,6 +2101,34 @@ func claudeCodePermissionRequestAskUserQuestionSurfacesAnswerableQuestion() thro
     #expect(envelope.eventType == "PermissionRequest")
     #expect(envelope.expectsResponse)
     #expect(envelope.intervention?.kind == .question)
+}
+
+@Test
+func claudeCodePermissionRequestWithNonQuestionToolQuestionsStaysApproval() throws {
+    let payload = """
+    {
+      "hook_event_name": "PermissionRequest",
+      "tool_name": "SurveyTool",
+      "tool_input": {
+        "questions": [
+          {"id": "q1", "question": "Internal tool argument", "options": [{"label": "A"}, {"label": "B"}]}
+        ]
+      },
+      "reason": "SurveyTool needs approval",
+      "session_id": "claude-approval"
+    }
+    """.data(using: .utf8)!
+
+    let envelope = HookPayloadMapper.makeEnvelope(
+        source: .claude,
+        arguments: ["island-bridge", "--source", "claude"],
+        environment: ["PWD": "/tmp/demo"],
+        stdinData: payload
+    )
+
+    #expect(envelope.eventType == "PermissionRequest")
+    #expect(envelope.expectsResponse)
+    #expect(envelope.intervention?.kind == .approval)
 }
 
 @Test
