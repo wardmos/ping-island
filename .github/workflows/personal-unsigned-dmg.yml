@@ -1,0 +1,48 @@
+name: Personal Unsigned DMG
+
+on:
+  push:
+    branches:
+      - release/personal
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Branch, tag, or SHA to build (defaults to the triggering ref)
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: personal-unsigned-dmg-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build unsigned DMG
+    runs-on: macos-15
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.ref || github.ref }}
+
+      - name: Show toolchain
+        run: xcodebuild -version
+
+      - name: Build unsigned DMG and ZIP
+        run: bash scripts/package-unsigned.sh
+
+      - name: Upload packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: ping-island-unsigned
+          path: |
+            releases/unsigned/*.dmg
+            releases/unsigned/*.zip
+          if-no-files-found: error
+          retention-days: 14
