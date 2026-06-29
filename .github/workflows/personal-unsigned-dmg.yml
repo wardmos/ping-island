@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - release/personal
+      - "pkg/**"
     paths:
       - ".github/workflows/personal-unsigned-dmg.yml"
       - "Config/**"
