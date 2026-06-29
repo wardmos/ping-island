@@ -1644,6 +1644,11 @@ private struct AgentUsageTokenSplitLine: View {
                 tint: TerminalColors.blue
             )
             AgentUsageTokenPill(
+                title: "缓存 Token",
+                value: AgentUsageFormat.compactTokenCount(totals.cache),
+                tint: TerminalColors.green
+            )
+            AgentUsageTokenPill(
                 title: "输出 Token",
                 value: AgentUsageFormat.compactTokenCount(totals.output),
                 tint: TerminalColors.amber

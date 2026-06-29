@@ -3,6 +3,22 @@ import Foundation
 import os.log
 import Security
 
+/// Wire format emitted by `PingIslandBridge --mode scan-claude-tokens`.
+/// Mirrors IslandShared's `ClaudeTokenUsageScanItem` (the app target cannot
+/// import the package, so the shape is restated here for decoding).
+private struct RemoteClaudeTokenScanItem: Decodable {
+    let sessionID: String
+    let sourceFilePath: String?
+    let capturedAtEpoch: Double?
+    let fileSize: UInt64?
+    let contentHash: String?
+    let input: Int
+    let cacheWrite: Int
+    let cacheRead: Int
+    let output: Int
+    let total: Int
+}
+
 @MainActor
 final class RemoteConnectorManager: ObservableObject {
     static let shared = RemoteConnectorManager()
@@ -81,6 +97,82 @@ final class RemoteConnectorManager: ObservableObject {
                     }
                 }
             }
+        }
+    }
+
+    /// Pulls Claude token consumption from every connected remote host by
+    /// invoking the embedded bridge's `scan-claude-tokens` mode over SSH, then
+    /// records it locally. Remote session IDs are namespaced per endpoint so
+    /// their baselines never collide with local sessions sharing a UUID.
+    func refreshRemoteClaudeTokenUsage() async {
+        let connectedIDs = Array(connectors.keys)
+        for endpointID in connectedIDs {
+            guard connectors[endpointID] != nil,
+                  let endpoint = endpoints.first(where: { $0.id == endpointID }) else {
+                continue
+            }
+            let password = resolvedCredential(for: endpointID, requestedPassword: nil).password
+            let launcherPath = "\(endpoint.remoteInstallRoot)/bin/ping-island-bridge"
+            let command = "\(Self.shellQuote(launcherPath)) --mode scan-claude-tokens"
+            do {
+                let result = try await RemoteSSHCommandRunner.runSSH(
+                    target: endpoint.sshTarget,
+                    port: endpoint.sshPort,
+                    password: password,
+                    remoteCommand: command,
+                    acceptNewHostKey: true,
+                    allowFailure: true
+                )
+                guard result.exitCode == 0 else {
+                    logger.debug(
+                        "Remote token scan non-zero exit endpoint=\(endpointID.uuidString, privacy: .public) code=\(result.exitCode, privacy: .public)"
+                    )
+                    continue
+                }
+                let sessions = Self.decodeRemoteTokenSessions(stdout: result.stdout, endpointID: endpointID)
+                guard !sessions.isEmpty else {
+                    continue
+                }
+                await AgentUsageStore.shared.recordClaudeTokenUsage(sessions)
+            } catch {
+                logger.error(
+                    "Remote token scan failed endpoint=\(endpointID.uuidString, privacy: .public) error=\(error.localizedDescription, privacy: .public)"
+                )
+            }
+        }
+    }
+
+    nonisolated private static func decodeRemoteTokenSessions(
+        stdout: String,
+        endpointID: UUID
+    ) -> [ClaudeSessionTokenUsage] {
+        // The bridge prints a JSON array; tolerate any shell banner around it.
+        guard let start = stdout.firstIndex(of: "["),
+              let end = stdout.lastIndex(of: "]"),
+              start <= end,
+              let items = try? JSONDecoder().decode(
+                [RemoteClaudeTokenScanItem].self,
+                from: Data(stdout[start...end].utf8)
+              ) else {
+            return []
+        }
+
+        let prefix = endpointID.uuidString
+        return items.map { item in
+            ClaudeSessionTokenUsage(
+                sessionID: "remote:\(prefix):\(item.sessionID)",
+                sourceFilePath: item.sourceFilePath.map { "remote:\(prefix):\($0)" },
+                capturedAt: item.capturedAtEpoch.map { Date(timeIntervalSince1970: $0) },
+                fileSize: item.fileSize,
+                contentHash: item.contentHash,
+                totals: AgentUsageTokenTotals(
+                    input: item.input,
+                    cacheWrite: item.cacheWrite,
+                    cacheRead: item.cacheRead,
+                    output: item.output,
+                    total: item.total
+                )
+            )
         }
     }
 
