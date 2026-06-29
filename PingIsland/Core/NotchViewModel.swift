@@ -263,6 +263,8 @@ class NotchViewModel: ObservableObject {
     private let autoHideWhenIdleProvider: @MainActor () -> Bool
     private let notchModuleWidthProvider: @MainActor () -> Double
     private var hoverTimer: DispatchWorkItem?
+    private var inactivityTimer: DispatchWorkItem?
+    private let inactivityCollapseDelay: TimeInterval = 30
     // Keep hover previews feeling responsive without making incidental cursor
     // passes over the notch expand it too aggressively.
     private let defaultHoverActivationDelay: TimeInterval = 0.24
@@ -528,6 +530,10 @@ class NotchViewModel: ObservableObject {
         let inNotch = isPointInHoverTrigger(location)
         let inOpened = status == .opened && geometry.isPointInOpenedPanel(location, size: openedSize)
 
+        if inOpened {
+            scheduleInactivityCollapse()
+        }
+
         let newHovering = inNotch || inOpened
 
         // Only update if changed to prevent unnecessary re-renders
@@ -785,6 +791,8 @@ class NotchViewModel: ObservableObject {
 
         openReason = reason
         status = .opened
+        GlobalShortcutManager.shared.setEscapeHotKeyEnabled(true)
+        scheduleInactivityCollapse()
         if case .instances = contentType {
             openedMeasuredHeight = nil
         }
@@ -822,6 +830,28 @@ class NotchViewModel: ObservableObject {
         contentType = .instances
         openedMeasuredHeight = nil
         isInlineTextInputActive = false
+        GlobalShortcutManager.shared.setEscapeHotKeyEnabled(false)
+        cancelInactivityCollapse()
+    }
+
+    private func scheduleInactivityCollapse() {
+        cancelInactivityCollapse()
+
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self, self.status == .opened else { return }
+            if self.isInlineTextInputActive {
+                self.scheduleInactivityCollapse()
+                return
+            }
+            self.notchClose()
+        }
+        inactivityTimer = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + inactivityCollapseDelay, execute: workItem)
+    }
+
+    private func cancelInactivityCollapse() {
+        inactivityTimer?.cancel()
+        inactivityTimer = nil
     }
 
     func beginDetachedPresentation(contentType: NotchContentType, playSound: Bool = true) {
