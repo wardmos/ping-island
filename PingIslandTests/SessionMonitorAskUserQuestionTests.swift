@@ -136,41 +136,6 @@ final class SessionMonitorAskUserQuestionTests: XCTestCase {
         XCTAssertNil(answers?["0"])
     }
 
-    func testUpdatedHookToolInputUsesClaudeAnswerShapeForQoderWork() {
-        let rawJSON = """
-        {
-          "questions": [
-            {
-              "id": "topic",
-              "header": "主题",
-              "question": "先选一个主题",
-              "options": [
-                { "label": "A 方案" },
-                { "label": "B 方案" }
-              ],
-              "multiSelect": false
-            }
-          ]
-        }
-        """
-
-        let updated = SessionMonitor.updatedHookToolInput(
-            rawJSON: rawJSON,
-            answers: ["topic": ["A 方案"]],
-            clientInfo: SessionClientInfo(
-                kind: .qoder,
-                profileID: "qoderwork",
-                name: "QoderWork",
-                bundleIdentifier: "com.qoder.work"
-            )
-        )
-
-        let answers = updated?["answers"] as? [String: Any]
-        XCTAssertEqual(answers?["先选一个主题"] as? String, "A 方案")
-        XCTAssertNil(answers?["topic"])
-        XCTAssertNil(answers?["0"])
-    }
-
     func testUpdatedHookToolInputUsesQuestionIndexForQwenCode() {
         let rawJSON = """
         {

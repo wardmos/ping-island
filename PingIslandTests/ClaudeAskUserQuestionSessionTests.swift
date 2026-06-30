@@ -149,23 +149,11 @@ final class ClaudeAskUserQuestionSessionTests: XCTestCase {
         XCTAssertEqual(session?.intervention?.kind, .question)
         XCTAssertEqual(session?.intervention?.resolvedQuestions.first?.prompt, "先选一个主题")
         XCTAssertEqual(session?.intervention?.resolvedQuestions.first?.options.map(\.title), ["A 方案", "B 方案"])
-        XCTAssertNil(session?.intervention?.metadata["responseMode"])
-        XCTAssertTrue(session?.intervention?.supportsInlineResponse ?? false)
+        XCTAssertEqual(session?.intervention?.metadata["responseMode"], "external_only")
+        XCTAssertFalse(session?.intervention?.supportsInlineResponse ?? true)
         XCTAssertEqual(session?.phase, .waitingForInput)
         XCTAssertTrue(session?.needsQuestionResponse ?? false)
         XCTAssertFalse(session?.needsApprovalResponse ?? true)
-
-        await store.process(
-            .interventionResolved(
-                sessionId: sessionId,
-                nextPhase: .processing,
-                submittedAnswers: ["topic": ["A 方案"]]
-            )
-        )
-
-        let resolvedSession = await store.session(for: sessionId)
-        XCTAssertNil(resolvedSession?.intervention)
-        XCTAssertEqual(resolvedSession?.phase, .processing)
 
         await store.process(.sessionArchived(sessionId: sessionId))
     }

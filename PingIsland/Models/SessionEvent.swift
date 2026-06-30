@@ -207,28 +207,12 @@ extension HookEvent {
 
     private nonisolated var isExternalClientQuestionEvent: Bool {
         (isQoderIDEQuestionNotificationClient
+            || clientInfo.profileID == "qoderwork"
+            || clientInfo.bundleIdentifier == "com.qoder.work"
             || clientInfo.profileID == "workbuddy"
             || clientInfo.bundleIdentifier == "com.workbuddy.workbuddy")
             && Self.questionToolNames.contains(normalizedToolNameForIntervention ?? "")
             && !(questionPayloads?.isEmpty ?? true)
-    }
-
-    private nonisolated var isQoderWorkInlineQuestionClient: Bool {
-        let normalizedClientInfo = clientInfo.normalizedForClaudeRouting()
-        if normalizedClientInfo.profileID == "qoderwork" {
-            return true
-        }
-
-        return [
-            normalizedClientInfo.terminalBundleIdentifier,
-            normalizedClientInfo.bundleIdentifier,
-            clientInfo.terminalBundleIdentifier,
-            clientInfo.bundleIdentifier
-        ].contains { value in
-            value?
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-                .lowercased() == "com.qoder.work"
-        }
     }
 
     private nonisolated var isQoderIDEQuestionNotificationClient: Bool {
@@ -283,12 +267,6 @@ extension HookEvent {
 
         if isExternalClientQuestionEvent {
             return event == "PreToolUse" || event == "PermissionRequest"
-        }
-
-        if isQoderWorkInlineQuestionClient {
-            return (event == "PreToolUse" || event == "PermissionRequest")
-                && Self.questionToolNames.contains(normalizedToolNameForIntervention ?? "")
-                && !(questionPayloads?.isEmpty ?? true)
         }
 
         if clientInfo.isQwenCodeClient {

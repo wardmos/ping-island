@@ -80,7 +80,7 @@ final class QoderWorkContinuationTests: XCTestCase {
         await store.process(.sessionArchived(sessionId: sessionId))
     }
 
-    func testQoderWorkResolvedInterventionClearsAfterInlineSubmission() async {
+    func testQoderWorkResolvedInterventionWaitsForClientContinuation() async {
         let sessionId = "qoderwork-cont-\(UUID().uuidString)"
         let store = SessionStore.shared
 
@@ -101,8 +101,11 @@ final class QoderWorkContinuationTests: XCTestCase {
         )
 
         let session = await store.session(for: sessionId)
-        XCTAssertEqual(session?.phase, .processing)
-        XCTAssertNil(session?.intervention)
+        XCTAssertEqual(session?.phase, .waitingForInput)
+        XCTAssertTrue(session?.intervention?.awaitsExternalContinuation ?? false)
+        XCTAssertFalse(session?.intervention?.supportsInlineResponse ?? true)
+        XCTAssertEqual(session?.intervention?.submittedAnswers["topic"], ["A 方案"])
+        XCTAssertEqual(session?.intervention?.questions.first?.options.first?.title, "A 方案")
 
         await store.process(.sessionArchived(sessionId: sessionId))
     }
@@ -300,7 +303,7 @@ final class QoderWorkContinuationTests: XCTestCase {
         await store.process(.sessionArchived(sessionId: sessionId))
     }
 
-    func testQoderWorkResolvedInterventionStaysClearedOnFullSyncOfExistingMessages() async {
+    func testQoderWorkContinuationDoesNotClearOnFullSyncOfExistingMessages() async {
         let sessionId = "qoderwork-fullsync-\(UUID().uuidString)"
         let store = SessionStore.shared
 
@@ -320,6 +323,8 @@ final class QoderWorkContinuationTests: XCTestCase {
             )
         )
 
+        let answeredAt = await store.session(for: sessionId)?.intervention?.externalContinuationAnsweredAt ?? Date()
+
         await store.process(.fileUpdated(
             FileUpdatePayload(
                 sessionId: sessionId,
@@ -328,7 +333,7 @@ final class QoderWorkContinuationTests: XCTestCase {
                     ChatMessage(
                         id: "assistant-existing",
                         role: .assistant,
-                        timestamp: Date().addingTimeInterval(-10),
+                        timestamp: answeredAt.addingTimeInterval(-10),
                         content: [.text("这是提交前就存在的旧消息")]
                     )
                 ],
@@ -340,13 +345,14 @@ final class QoderWorkContinuationTests: XCTestCase {
         ))
 
         let session = await store.session(for: sessionId)
-        XCTAssertNil(session?.intervention)
-        XCTAssertEqual(session?.phase, .processing)
+        XCTAssertTrue(session?.intervention?.awaitsExternalContinuation ?? false)
+        XCTAssertEqual(session?.intervention?.submittedAnswers["topic"], ["A 方案"])
+        XCTAssertEqual(session?.phase, .waitingForInput)
 
         await store.process(.sessionArchived(sessionId: sessionId))
     }
 
-    func testQoderWorkPendingQuestionDoesNotClearOnPostToolUseHook() async {
+    func testQoderWorkContinuationDoesNotClearOnPostToolUseHook() async {
         let sessionId = "qoderwork-posttool-\(UUID().uuidString)"
         let store = SessionStore.shared
 
@@ -358,6 +364,13 @@ final class QoderWorkContinuationTests: XCTestCase {
                 bundleIdentifier: "com.qoder.work"
             )
         ))
+        await store.process(
+            .interventionResolved(
+                sessionId: sessionId,
+                nextPhase: .processing,
+                submittedAnswers: ["topic": ["A 方案"]]
+            )
+        )
 
         await store.process(.hookReceived(
             HookEvent(
@@ -383,10 +396,8 @@ final class QoderWorkContinuationTests: XCTestCase {
         ))
 
         let session = await store.session(for: sessionId)
-        XCTAssertEqual(session?.phase, .waitingForInput)
-        XCTAssertEqual(session?.intervention?.kind, .question)
-        XCTAssertTrue(session?.intervention?.supportsInlineResponse ?? false)
-        XCTAssertEqual(session?.intervention?.resolvedQuestions.first?.options.first?.title, "A 方案")
+        XCTAssertTrue(session?.intervention?.awaitsExternalContinuation ?? false)
+        XCTAssertEqual(session?.intervention?.submittedAnswers["topic"], ["A 方案"])
 
         await store.process(.sessionArchived(sessionId: sessionId))
     }
@@ -542,7 +553,7 @@ final class QoderWorkContinuationTests: XCTestCase {
         await store.process(.sessionArchived(sessionId: sessionId))
     }
 
-    func testQoderWorkResolvedInterventionDoesNotCreateExternalContinuationTimeout() async {
+    func testQoderWorkContinuationClearsAfterFiveMinuteTimeout() async {
         let sessionId = "qoderwork-timeout-\(UUID().uuidString)"
         let store = SessionStore.shared
 
@@ -563,11 +574,11 @@ final class QoderWorkContinuationTests: XCTestCase {
         )
 
         let answeredAt = await store.session(for: sessionId)?.intervention?.externalContinuationAnsweredAt
-        XCTAssertNil(answeredAt)
+        XCTAssertNotNil(answeredAt)
 
         await store.process(
             .pruneTimedOutExternalContinuations(
-                now: Date().addingTimeInterval(301)
+                now: answeredAt?.addingTimeInterval(301) ?? Date().addingTimeInterval(301)
             )
         )
 

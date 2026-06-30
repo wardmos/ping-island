@@ -86,13 +86,13 @@ final class QoderWorkHookEventTimingTests: XCTestCase {
         XCTAssertTrue(event.isAskUserQuestionRequest)
         XCTAssertEqual(event.intervention?.kind, .question)
         XCTAssertEqual(event.intervention?.id, "call_123")
-        XCTAssertTrue(event.intervention?.supportsInlineResponse ?? false)
-        XCTAssertNil(event.intervention?.metadata["responseMode"])
-        XCTAssertTrue(event.intervention?.message.contains("提交后会继续执行") ?? false)
+        XCTAssertFalse(event.intervention?.supportsInlineResponse ?? true)
+        XCTAssertEqual(event.intervention?.metadata["responseMode"], "external_only")
+        XCTAssertTrue(event.intervention?.message.contains("暂不支持直接提交") ?? false)
         XCTAssertEqual(event.determinePhase(), .waitingForInput)
     }
 
-    func testQoderWorkPermissionRequestQuestionSupportsInlineResponse() {
+    func testQoderWorkPermissionRequestQuestionReusesStableInterventionID() {
         let event = HookEvent(
             sessionId: "qoderwork-session",
             cwd: "/tmp/project",
@@ -127,12 +127,16 @@ final class QoderWorkHookEventTimingTests: XCTestCase {
 
         XCTAssertTrue(event.isAskUserQuestionRequest)
         XCTAssertEqual(event.intervention?.kind, .question)
-        XCTAssertTrue(event.intervention?.supportsInlineResponse ?? false)
-        XCTAssertNil(event.intervention?.metadata["responseMode"])
+        XCTAssertEqual(
+            event.intervention?.id,
+            "qoderwork-question-qoderwork-session-topic"
+        )
+        XCTAssertFalse(event.intervention?.supportsInlineResponse ?? true)
+        XCTAssertEqual(event.intervention?.metadata["responseMode"], "external_only")
         XCTAssertEqual(event.determinePhase(), .waitingForInput)
     }
 
-    func testQoderWorkBridgeQuestionUsesToolInputForInlineSubmission() {
+    func testQoderWorkBridgeQuestionUsesToolInputForExternalModeAndDefaultAnswer() {
         let bridgeIntervention = SessionIntervention(
             id: "call_bridge",
             kind: .question,
@@ -180,10 +184,16 @@ final class QoderWorkHookEventTimingTests: XCTestCase {
             bridgeIntervention: bridgeIntervention
         )
 
-        XCTAssertNil(event.intervention?.metadata["responseMode"])
-        XCTAssertTrue(event.intervention?.supportsInlineResponse ?? false)
+        XCTAssertEqual(event.intervention?.metadata["responseMode"], "external_only")
+        XCTAssertFalse(event.intervention?.supportsInlineResponse ?? true)
         XCTAssertEqual(event.intervention?.questions.first?.options.first?.title, "A 方案")
-        XCTAssertNil(SessionMonitor.defaultQoderAutoAnswer(for: event))
+
+        let autoAnswer = SessionMonitor.defaultQoderAutoAnswer(for: event)
+        XCTAssertEqual(autoAnswer?.toolUseId, "call_bridge")
+        XCTAssertEqual(autoAnswer?.answers["topic"], ["A 方案"])
+        let answers = autoAnswer?.updatedInput["answers"] as? [String: Any]
+        XCTAssertEqual(answers?["topic"] as? String, "A 方案")
+        XCTAssertEqual(answers?["先选一个主题"] as? String, "A 方案")
     }
 
     func testWorkBuddyPreToolUseQuestionUsesExternalClientMode() {
@@ -457,7 +467,7 @@ final class QoderWorkHookEventTimingTests: XCTestCase {
         XCTAssertEqual(event.determinePhase(), .waitingForInput)
     }
 
-    func testQoderWorkDoesNotUseQoderIDEAutoAnswerFallback() {
+    func testQoderWorkAutoAnswerUsesFirstOptionForEveryQuestion() {
         let event = HookEvent(
             sessionId: "qoderwork-session",
             cwd: "/tmp/project",
@@ -491,6 +501,13 @@ final class QoderWorkHookEventTimingTests: XCTestCase {
             message: nil
         )
 
-        XCTAssertNil(SessionMonitor.defaultQoderAutoAnswer(for: event))
+        let autoAnswer = SessionMonitor.defaultQoderAutoAnswer(for: event)
+
+        XCTAssertEqual(autoAnswer?.toolUseId, "call_auto")
+        XCTAssertEqual(autoAnswer?.answers["topic"], ["A 方案"])
+        let updatedInput = autoAnswer?.updatedInput
+        let answers = updatedInput?["answers"] as? [String: Any]
+        XCTAssertEqual(answers?["topic"] as? String, "A 方案")
+        XCTAssertEqual(answers?["先选一个主题"] as? String, "A 方案")
     }
 }

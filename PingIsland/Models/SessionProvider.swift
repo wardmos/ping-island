@@ -383,6 +383,7 @@ struct SessionClientInfo: Codable, Equatable, Sendable {
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
         if normalizedProfileID == "qoder"
+            || normalizedProfileID == "qoderwork"
             || normalizedProfileID == "codebuddy"
             || normalizedProfileID == "workbuddy" {
             return true
@@ -392,7 +393,7 @@ struct SessionClientInfo: Codable, Equatable, Sendable {
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
         switch normalizedHostBundleIdentifier {
-        case "com.qoder.ide", "com.tencent.codebuddy", "com.codebuddy.app", "com.workbuddy.workbuddy":
+        case "com.qoder.ide", "com.qoder.work", "com.tencent.codebuddy", "com.codebuddy.app", "com.workbuddy.workbuddy":
             return true
         default:
             return false
