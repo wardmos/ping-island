@@ -28,8 +28,70 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  linux-bridge:
+    name: Build Linux remote bridge
+    runs-on: ${{ matrix.runner }}
+    container: swift:6.1.3-jammy
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            artifact_arch: x86_64
+            swift_sdk: x86_64-swift-linux-musl
+          - runner: ubuntu-24.04-arm
+            artifact_arch: aarch64
+            swift_sdk: aarch64-swift-linux-musl
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.ref || github.ref }}
+
+      - name: Build Linux PingIslandBridge
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          static_sdk_url="https://download.swift.org/swift-6.1.3-release/static-sdk/swift-6.1.3-RELEASE/swift-6.1.3-RELEASE_static-linux-0.0.1.artifactbundle.tar.gz"
+          static_sdk_checksum="7a741da46ce64cdbd6dd504a2617b211b88e7f66a9ada7ea4e55bcc9c06ff2b2"
+          swift sdk install "$static_sdk_url" --checksum "$static_sdk_checksum"
+
+          swift build --package-path Prototype -c release --swift-sdk "${{ matrix.swift_sdk }}" --product PingIslandBridge
+
+          bridge_path="Prototype/.build/${{ matrix.swift_sdk }}/release/PingIslandBridge"
+          if command -v file >/dev/null 2>&1; then
+            file "$bridge_path"
+          fi
+          ldd_output="$(ldd "$bridge_path" 2>&1 || true)"
+          printf '%s\n' "$ldd_output"
+          if printf '%s\n' "$ldd_output" | grep -Eq 'libswift|libc\.so|ld-linux|GLIBC_'; then
+            echo "::error::Linux PingIslandBridge must be a musl static executable without glibc or Swift shared-library dependencies"
+            exit 1
+          fi
+
+          mkdir -p releases/bridge
+          bridge_name="PingIslandBridge-linux-musl-${{ matrix.artifact_arch }}"
+          cp "$bridge_path" "releases/bridge/$bridge_name"
+          chmod +x "releases/bridge/$bridge_name"
+          (
+            cd releases/bridge
+            python3 -m zipfile -c "$bridge_name.zip" "$bridge_name"
+          )
+
+      - name: Upload Linux bridge artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: PingIslandBridge-linux-musl-${{ matrix.artifact_arch }}.zip
+          path: releases/bridge/PingIslandBridge-linux-musl-${{ matrix.artifact_arch }}.zip
+          if-no-files-found: error
+
   build:
     name: Build unsigned DMG
+    needs: linux-bridge
     runs-on: macos-15
     timeout-minutes: 45
 
@@ -51,10 +113,18 @@ jobs:
           short_sha="${SOURCE_SHA:0:7}"
           echo "suffix=-$short_sha" >> "$GITHUB_OUTPUT"
 
+      - name: Download Linux bridge artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: releases/bridge
+          pattern: PingIslandBridge-linux-musl-*.zip
+          merge-multiple: true
+
       - name: Build unsigned DMG
         env:
           PING_ISLAND_PACKAGE_SUFFIX: ${{ steps.package.outputs.suffix }}
           PING_ISLAND_DMG_STYLE: plain
+          PING_ISLAND_BUNDLED_REMOTE_BRIDGE_DIR: ${{ github.workspace }}/releases/bridge
           COMPILER_INDEX_STORE_ENABLE: NO
         run: bash scripts/package-unsigned.sh
 

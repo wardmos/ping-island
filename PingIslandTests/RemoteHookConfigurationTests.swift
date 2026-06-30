@@ -104,6 +104,10 @@ final class RemoteHookConfigurationTests: XCTestCase {
             "PingIslandBridge-linux-musl-x86_64.zip"
         )
         XCTAssertEqual(
+            RemoteConnectorManager.remoteLinuxBridgeResourceSubpath(binaryName: "PingIslandBridge-linux-musl-x86_64"),
+            "RemoteBridge/PingIslandBridge-linux-musl-x86_64"
+        )
+        XCTAssertEqual(
             RemoteConnectorManager.remoteLinuxBridgeBinaryAssetName(normalizedArchitecture: "aarch64"),
             "PingIslandBridge-linux-musl-aarch64"
         )

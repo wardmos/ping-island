@@ -14,6 +14,7 @@ DMG_BACKGROUND_SOURCE="${PING_ISLAND_DMG_BACKGROUND_SOURCE:-$PROJECT_DIR/docs/im
 DMG_LOGO_SOURCE="${PING_ISLAND_DMG_LOGO_SOURCE:-$PROJECT_DIR/docs/images/ping-island-icon-transparent.svg}"
 PACKAGE_SUFFIX="${PING_ISLAND_PACKAGE_SUFFIX:-}"
 DMG_STYLE="${PING_ISLAND_DMG_STYLE:-styled}"
+BUNDLED_REMOTE_BRIDGE_DIR="${PING_ISLAND_BUNDLED_REMOTE_BRIDGE_DIR:-$PROJECT_DIR/releases/bridge}"
 
 APP_BUNDLE_NAME="Ping Island.app"
 APP_PRODUCT_NAME="PingIsland"
@@ -49,6 +50,57 @@ resolve_dmg_icon_source() {
     fi
 
     resolve_exported_app_icon
+}
+
+embed_remote_bridge_assets() {
+    local source_dir="$1"
+    local resources_dir="$APP_PATH/Contents/Resources/RemoteBridge"
+    local scratch_dir="$BUILD_DIR/remote-bridge-extract"
+    local copied=0
+
+    if [ ! -d "$source_dir" ]; then
+        echo "No bundled remote bridge directory found at $source_dir; skipping."
+        return 0
+    fi
+
+    shopt -s nullglob
+    local bridge_sources=(
+        "$source_dir"/PingIslandBridge-linux-musl-*
+    )
+    shopt -u nullglob
+
+    if [ "${#bridge_sources[@]}" -eq 0 ]; then
+        echo "No Linux remote bridge assets found in $source_dir; skipping."
+        return 0
+    fi
+
+    rm -rf "$resources_dir" "$scratch_dir"
+    mkdir -p "$resources_dir" "$scratch_dir"
+
+    for bridge_source in "${bridge_sources[@]}"; do
+        local base_name
+        base_name="$(basename "$bridge_source")"
+        local binary_name="${base_name%.zip}"
+
+        if [[ "$bridge_source" == *.zip ]]; then
+            local extract_dir="$scratch_dir/$binary_name"
+            mkdir -p "$extract_dir"
+            ditto -x -k "$bridge_source" "$extract_dir"
+            if [ ! -f "$extract_dir/$binary_name" ]; then
+                echo "ERROR: Expected $binary_name inside $bridge_source"
+                exit 1
+            fi
+            cp "$extract_dir/$binary_name" "$resources_dir/$binary_name"
+        else
+            cp "$bridge_source" "$resources_dir/$binary_name"
+        fi
+
+        chmod 755 "$resources_dir/$binary_name"
+        copied=$((copied + 1))
+    done
+
+    rm -rf "$scratch_dir"
+    echo "Embedded $copied Linux remote bridge asset(s) into $resources_dir"
 }
 
 if [ ! -f "$DMG_BACKGROUND_SOURCE" ]; then
@@ -92,6 +144,8 @@ if [ ! -d "$APP_PATH" ]; then
     echo "ERROR: App bundle not found at $APP_PATH"
     exit 1
 fi
+
+embed_remote_bridge_assets "$BUNDLED_REMOTE_BRIDGE_DIR"
 
 DMG_ICON_SOURCE="$(resolve_dmg_icon_source)"
 if [ ! -f "$DMG_ICON_SOURCE" ]; then
