@@ -1240,6 +1240,10 @@ final class RemoteConnectorManager: ObservableObject {
         "PingIslandBridge-linux-musl-\(normalizedArchitecture)"
     }
 
+    nonisolated static func remoteLinuxBridgeResourceSubpath(binaryName: String) -> String {
+        "RemoteBridge/\(binaryName)"
+    }
+
     nonisolated static func remoteLinuxBridgeArchiveAssetName(normalizedArchitecture: String) -> String {
         remoteLinuxBridgeBinaryAssetName(normalizedArchitecture: normalizedArchitecture) + ".zip"
     }
@@ -2322,6 +2326,10 @@ private final class RemoteBridgeAssetResolver {
 
         let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0.0"
         let binaryAssetName = RemoteConnectorManager.remoteLinuxBridgeBinaryAssetName(normalizedArchitecture: normalizedArch)
+        if let bundledBinaryURL = bundledLinuxBridgeURL(binaryName: binaryAssetName) {
+            return bundledBinaryURL
+        }
+
         let assetCandidates = [
             (
                 archive: RemoteConnectorManager.remoteLinuxBridgeArchiveAssetName(normalizedArchitecture: normalizedArch),
@@ -2396,6 +2404,20 @@ private final class RemoteBridgeAssetResolver {
                 downloadFailures.joined(separator: "；")
             )
         )
+    }
+
+    private func bundledLinuxBridgeURL(binaryName: String) -> URL? {
+        let resourceSubpath = RemoteConnectorManager.remoteLinuxBridgeResourceSubpath(binaryName: binaryName)
+        guard let resourceURL = Bundle.main.resourceURL else {
+            return nil
+        }
+
+        let url = resourceURL.appendingPathComponent(resourceSubpath, isDirectory: false)
+        guard fileManager.isReadableFile(atPath: url.path) else {
+            return nil
+        }
+
+        return url
     }
 
     private func extractLinuxBridgeArchive(
