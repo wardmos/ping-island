@@ -457,7 +457,7 @@ extension HookEvent {
         let title = parsedQuestions.count == 1
             ? "\(actorName) 的提问"
             : "\(actorName) 的提问（\(parsedQuestions.count) 个问题）"
-        var metadata: [String: String] = ["toolName": "AskUserQuestion"]
+        var metadata: [String: String] = ["toolName": tool ?? "AskUserQuestion"]
         if let toolInputJSONObject,
            let data = try? JSONSerialization.data(withJSONObject: toolInputJSONObject, options: [.sortedKeys]),
            let json = String(data: data, encoding: .utf8) {

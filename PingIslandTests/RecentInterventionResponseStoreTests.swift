@@ -223,6 +223,80 @@ final class RecentInterventionResponseStoreTests: XCTestCase {
         XCTAssertEqual(replay?.updatedInput?["answers"]?.value as? [String: String], ["project": "会话层"])
     }
 
+    func testClaudeAnswerCanBeReplayedForDuplicateAskFollowupQuestionPermissionRequest() {
+        var store = RecentInterventionResponseStore(ttl: 30)
+
+        let clientInfo = SessionClientInfo(
+            kind: .claudeCode,
+            profileID: "claude_code",
+            name: "Claude Code",
+            bundleIdentifier: "com.anthropic.claudecode"
+        )
+        let toolInput: [String: AnyCodable] = [
+            "questions": AnyCodable([
+                [
+                    "id": "followup",
+                    "header": "补充",
+                    "question": "还要继续处理哪里？",
+                    "options": [
+                        ["label": "测试"],
+                        ["label": "文档"]
+                    ]
+                ]
+            ])
+        ]
+
+        let questionEvent = HookEvent(
+            sessionId: "claude-followup-session",
+            cwd: "/tmp/project",
+            event: "PreToolUse",
+            status: "waiting_for_input",
+            provider: .claude,
+            clientInfo: clientInfo,
+            pid: nil,
+            tty: nil,
+            tool: "AskFollowupQuestion",
+            toolInput: toolInput,
+            toolUseId: "toolu_followup",
+            notificationType: nil,
+            message: nil
+        )
+
+        let duplicatePermissionEvent = HookEvent(
+            sessionId: "claude-followup-session",
+            cwd: "/tmp/project",
+            event: "PermissionRequest",
+            status: "waiting_for_approval",
+            provider: .claude,
+            clientInfo: clientInfo,
+            pid: nil,
+            tty: nil,
+            tool: "AskFollowupQuestion",
+            toolInput: toolInput,
+            toolUseId: "toolu_followup",
+            notificationType: nil,
+            message: nil
+        )
+
+        store.record(
+            event: questionEvent,
+            decision: "answer",
+            reason: nil,
+            updatedInput: [
+                "answers": AnyCodable(["followup": "测试"])
+            ],
+            now: Date(timeIntervalSince1970: 100)
+        )
+
+        let replay = store.response(
+            for: duplicatePermissionEvent,
+            now: Date(timeIntervalSince1970: 101)
+        )
+
+        XCTAssertEqual(replay?.decision, "answer")
+        XCTAssertEqual(replay?.updatedInput?["answers"]?.value as? [String: String], ["followup": "测试"])
+    }
+
     func testCodeBuddyCLINotificationAnswerCanReplayToPermissionRequest() {
         var store = RecentInterventionResponseStore(ttl: 30)
 

@@ -62,6 +62,38 @@ final class ClaudeAskUserQuestionSessionTests: XCTestCase {
         await store.process(.sessionArchived(sessionId: sessionId))
     }
 
+    func testDuplicateFollowupPermissionRequestDoesNotRestoreQuestionAfterAnswer() async {
+        let sessionId = "claude-followup-answer-\(UUID().uuidString)"
+        let store = SessionStore.shared
+
+        await store.process(.hookReceived(makeClaudeQuestionEvent(
+            sessionId: sessionId,
+            tool: "AskFollowupQuestion",
+            questionId: "followup",
+            question: "还要继续处理哪里？"
+        )))
+        await store.process(
+            .interventionResolved(
+                sessionId: sessionId,
+                nextPhase: .processing,
+                submittedAnswers: ["followup": ["会话层"]]
+            )
+        )
+        await store.process(.hookReceived(makeClaudePermissionRequest(
+            sessionId: sessionId,
+            tool: "AskFollowupQuestion",
+            questionId: "followup",
+            question: "还要继续处理哪里？"
+        )))
+
+        let session = await store.session(for: sessionId)
+        XCTAssertEqual(session?.phase, .processing)
+        XCTAssertNil(session?.intervention)
+        XCTAssertNil(session?.activePermission)
+
+        await store.process(.sessionArchived(sessionId: sessionId))
+    }
+
     func testUnrelatedPostToolUseDoesNotClearPendingClaudeQuestion() async {
         let sessionId = "claude-question-posttool-\(UUID().uuidString)"
         let store = SessionStore.shared
@@ -495,6 +527,7 @@ final class ClaudeAskUserQuestionSessionTests: XCTestCase {
     private func makeClaudeQuestionEvent(
         sessionId: String,
         toolUseId: String? = nil,
+        tool: String = "AskUserQuestion",
         questionId: String = "project",
         question: String = "你想先处理哪个模块？"
     ) -> HookEvent {
@@ -512,7 +545,7 @@ final class ClaudeAskUserQuestionSessionTests: XCTestCase {
             ),
             pid: nil,
             tty: nil,
-            tool: "AskUserQuestion",
+            tool: tool,
             toolInput: [
                 "questions": AnyCodable([
                     [
@@ -567,7 +600,12 @@ final class ClaudeAskUserQuestionSessionTests: XCTestCase {
         )
     }
 
-    private func makeClaudePermissionRequest(sessionId: String) -> HookEvent {
+    private func makeClaudePermissionRequest(
+        sessionId: String,
+        tool: String = "AskUserQuestion",
+        questionId: String = "project",
+        question: String = "你想先处理哪个模块？"
+    ) -> HookEvent {
         HookEvent(
             sessionId: sessionId,
             cwd: "/tmp/project",
@@ -582,13 +620,13 @@ final class ClaudeAskUserQuestionSessionTests: XCTestCase {
             ),
             pid: nil,
             tty: nil,
-            tool: "AskUserQuestion",
+            tool: tool,
             toolInput: [
                 "questions": AnyCodable([
                     [
-                        "id": "project",
+                        "id": questionId,
                         "header": "方向",
-                        "question": "你想先处理哪个模块？",
+                        "question": question,
                         "options": [
                             ["label": "会话层"],
                             ["label": "UI 层"]

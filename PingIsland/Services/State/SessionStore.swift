@@ -63,6 +63,7 @@ actor SessionStore {
     private var codexRolloutParsesInFlight: Set<String> = []
     private var codexSessionAliases: [String: String] = [:]
     private var ignoredCodexAuxiliaryHookSessionIds: Set<String> = []
+    private var resolvedQuestionInterventionKeysBySession: [String: Set<String>] = [:]
 
     /// Sync debounce interval (100ms)
     private let syncDebounceNs: UInt64 = 100_000_000
@@ -543,10 +544,20 @@ actor SessionStore {
             for: event,
             session: session
         )
+        let hookIntervention = event.intervention
+        if shouldSkipResolvedQuestionIntervention(hookIntervention, for: event, in: session) {
+            Self.logger.notice(
+                "Ignoring already resolved Claude question session=\(sessionId, privacy: .public) tool=\((event.toolUseId ?? "").prefix(12), privacy: .public)"
+            )
+            sessions[sessionId] = session
+            syncLinkedQoderChildSessions(for: session)
+            await AgentUsageStore.shared.recordHookEvent(event, resolvedSessionID: sessionId)
+            return
+        }
         let newPhase: SessionPhase = shouldPreserveEndedStopForAnsweredQuestion || codeBuddyCLINotificationIntervention != nil
             ? .waitingForInput
             : event.determinePhase()
-        let intervention = codeBuddyCLINotificationIntervention ?? event.intervention
+        let intervention = codeBuddyCLINotificationIntervention ?? hookIntervention
         let shouldPreserveQwenQuestionIntervention = shouldPreserveQwenQuestionIntervention(
             for: event,
             newPhase: newPhase,
@@ -1255,6 +1266,90 @@ actor SessionStore {
         }
     }
 
+    private func recordResolvedQuestionIntervention(
+        _ intervention: SessionIntervention,
+        in session: SessionState
+    ) {
+        guard shouldTrackResolvedQuestionIntervention(intervention, in: session),
+              let key = resolvedQuestionInterventionKey(for: intervention) else {
+            return
+        }
+
+        resolvedQuestionInterventionKeysBySession[session.sessionId, default: []].insert(key)
+    }
+
+    private func shouldSkipResolvedQuestionIntervention(
+        _ intervention: SessionIntervention?,
+        for event: HookEvent,
+        in session: SessionState
+    ) -> Bool {
+        guard let intervention,
+              event.provider == .claude,
+              event.event == "PermissionRequest",
+              shouldTrackResolvedQuestionIntervention(intervention, in: session),
+              event.clientInfo.isPlainClaudeCodeRouting,
+              let key = resolvedQuestionInterventionKey(for: intervention) else {
+            return false
+        }
+
+        return resolvedQuestionInterventionKeysBySession[session.sessionId]?.contains(key) == true
+    }
+
+    private nonisolated func shouldTrackResolvedQuestionIntervention(
+        _ intervention: SessionIntervention,
+        in session: SessionState
+    ) -> Bool {
+        intervention.kind == .question
+            && intervention.supportsInlineResponse
+            && session.provider == .claude
+            && session.clientInfo.isPlainClaudeCodeRouting
+    }
+
+    private nonisolated func resolvedQuestionInterventionKey(for intervention: SessionIntervention) -> String? {
+        guard intervention.kind == .question else { return nil }
+
+        let toolUseId = [
+            intervention.metadata["originalToolUseId"],
+            intervention.metadata["toolUseId"],
+            intervention.metadata["tool_use_id"]
+        ]
+        .compactMap { value -> String? in
+            guard let value else { return nil }
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
+        }
+        .first
+        if let toolUseId {
+            return "tool:\(toolUseId)"
+        }
+
+        let questionSignature = intervention.resolvedQuestions
+            .map(\.mergeSignature)
+            .joined(separator: "||")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !questionSignature.isEmpty else { return nil }
+
+        let toolName = normalizedQuestionToolName(for: intervention) ?? "question"
+        return "question:\(toolName):\(questionSignature)"
+    }
+
+    private nonisolated func normalizedQuestionToolName(for intervention: SessionIntervention) -> String? {
+        [
+            intervention.metadata["toolName"],
+            intervention.metadata["tool_name"]
+        ]
+        .compactMap { value -> String? in
+            guard let value else { return nil }
+            let normalized = value
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased()
+                .replacingOccurrences(of: "_", with: "")
+                .replacingOccurrences(of: "-", with: "")
+            return normalized.isEmpty ? nil : normalized
+        }
+        .first
+    }
+
     private nonisolated func interventionsMatch(
         _ lhs: SessionIntervention,
         _ rhs: SessionIntervention
@@ -1786,6 +1881,9 @@ actor SessionStore {
         submittedAnswers: [String: [String]]?
     ) async {
         guard var session = sessions[sessionId] else { return }
+        if let intervention = session.intervention {
+            recordResolvedQuestionIntervention(intervention, in: session)
+        }
         if let intervention = session.intervention,
            shouldAwaitExternalContinuationAfterResolving(intervention, in: session) {
             removePendingIntervention(intervention, from: &session)
@@ -2513,8 +2611,10 @@ actor SessionStore {
             .filter { $0.linkedParentSessionId == resolvedSessionId }
             .map(\.sessionId)
         sessions.removeValue(forKey: resolvedSessionId)
+        resolvedQuestionInterventionKeysBySession.removeValue(forKey: resolvedSessionId)
         for childSessionId in linkedChildSessionIDs {
             sessions.removeValue(forKey: childSessionId)
+            resolvedQuestionInterventionKeysBySession.removeValue(forKey: childSessionId)
         }
         clearCodexSessionAliases(for: resolvedSessionId)
         cancelPendingSync(sessionId: resolvedSessionId)
