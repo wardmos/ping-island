@@ -112,6 +112,14 @@ class NotchWindowController: NSWindowController {
             }
             .store(in: &cancellables)
 
+        viewModel.$isHovering
+            .receive(on: DispatchQueue.main)
+            .sink { [weak notchWindow, weak viewModel] _ in
+                guard let notchWindow, let viewModel else { return }
+                notchWindow.ignoresMouseEvents = Self.shouldIgnoreMouseEvents(for: viewModel)
+            }
+            .store(in: &cancellables)
+
         viewModel.$isFullscreenBrowserHiddenActive
             .receive(on: DispatchQueue.main)
             .sink { [weak self, weak notchWindow, weak viewModel] _ in
@@ -172,15 +180,17 @@ class NotchWindowController: NSWindowController {
             window.orderFront(nil)
         }
 
-        switch viewModel.status {
-        case .opened:
-            window.ignoresMouseEvents = false
-            if viewModel.openReason != .notification {
-                NSApp.activate(ignoringOtherApps: false)
-                window.makeKey()
-            }
-        case .closed, .popping:
-            window.ignoresMouseEvents = true
+        window.ignoresMouseEvents = Self.shouldIgnoreMouseEvents(for: viewModel)
+
+        if viewModel.status == .opened, viewModel.openReason != .notification {
+            NSApp.activate(ignoringOtherApps: false)
+            window.makeKey()
         }
+    }
+
+    private static func shouldIgnoreMouseEvents(for viewModel: NotchViewModel) -> Bool {
+        guard !viewModel.shouldHideWindowPresentation else { return true }
+        guard viewModel.status == .opened else { return true }
+        return !viewModel.isHovering
     }
 }

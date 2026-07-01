@@ -64,59 +64,7 @@ class NotchPanel: NSPanel {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
 
-    // MARK: - Click-through for areas outside the panel content
-
-    override func sendEvent(_ event: NSEvent) {
-        // For mouse events, check if we should pass through
-        if event.type == .leftMouseDown || event.type == .leftMouseUp ||
-           event.type == .rightMouseDown || event.type == .rightMouseUp {
-            // Get the location in window coordinates
-            let locationInWindow = event.locationInWindow
-
-            // Check if any view wants to handle this event
-            if let contentView = self.contentView,
-               contentView.hitTest(locationInWindow) == nil {
-                // No view wants this event - pass it through to windows behind
-                // by temporarily ignoring mouse events and re-posting
-                let screenLocation = convertPoint(toScreen: locationInWindow)
-                ignoresMouseEvents = true
-
-                // Re-post the event after a tiny delay
-                DispatchQueue.main.async { [weak self] in
-                    self?.repostMouseEvent(event, at: screenLocation)
-                }
-                return
-            }
-        }
-
-        super.sendEvent(event)
-    }
-
-    private func repostMouseEvent(_ event: NSEvent, at screenLocation: NSPoint) {
-        let cgPoint = MouseEventReplay.repostLocation(
-            for: event,
-            fallbackScreenLocation: screenLocation
-        )
-
-        let mouseType: CGEventType
-        switch event.type {
-        case .leftMouseDown: mouseType = .leftMouseDown
-        case .leftMouseUp: mouseType = .leftMouseUp
-        case .rightMouseDown: mouseType = .rightMouseDown
-        case .rightMouseUp: mouseType = .rightMouseUp
-        default: return
-        }
-
-        let mouseButton: CGMouseButton = event.type == .rightMouseDown || event.type == .rightMouseUp ? .right : .left
-
-        if let cgEvent = CGEvent(
-            mouseEventSource: nil,
-            mouseType: mouseType,
-            mouseCursorPosition: cgPoint,
-            mouseButton: mouseButton
-        ) {
-            MouseEventReplay.mark(cgEvent)
-            cgEvent.post(tap: .cghidEventTap)
-        }
-    }
+    // Click-through for the non-interactive area is handled by toggling
+    // `ignoresMouseEvents` from NotchWindowController as the cursor enters and
+    // leaves the island, so no per-event hit-testing or re-posting is needed.
 }
