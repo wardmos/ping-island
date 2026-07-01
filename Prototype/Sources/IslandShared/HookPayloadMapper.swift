@@ -396,6 +396,9 @@ public enum HookPayloadMapper {
                 return SessionStatus(kind: .waitingForInput)
             }
         }
+        if isQoderWorkNotifyOnlyPermissionRequest(eventType: eventType, payload: payload, clientKind: clientKind) {
+            return SessionStatus(kind: .active)
+        }
         if isQoderQuestionToolEvent(eventType: eventType, payload: payload) {
             return SessionStatus(kind: .waitingForInput)
         }
@@ -859,6 +862,10 @@ public enum HookPayloadMapper {
                 ],
                 rawContext: flattenMetadata(payload: payload)
             )
+        }
+
+        if isQoderWorkNotifyOnlyPermissionRequest(eventType: eventType, payload: payload, clientKind: clientKind) {
+            return nil
         }
 
         let lowered = eventType.lowercased()
@@ -1582,6 +1589,16 @@ public enum HookPayloadMapper {
             return false
         }
         return true
+    }
+
+    private static func isQoderWorkNotifyOnlyPermissionRequest(
+        eventType: String,
+        payload: [String: Any],
+        clientKind: String?
+    ) -> Bool {
+        clientKind == "qoderwork"
+            && eventType == "PermissionRequest"
+            && !isQoderWorkPermissionQuestionEvent(eventType: eventType, payload: payload)
     }
 
     private static func shouldSurfaceQuestionIntervention(

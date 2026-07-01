@@ -163,6 +163,10 @@ struct HookEvent: Sendable {
             return false
         }
 
+        if isQoderWorkNotifyOnlyPermissionRequest {
+            return false
+        }
+
         if isQoderWorkNonResponsiveToolEvent {
             return false
         }
@@ -207,7 +211,16 @@ struct HookEvent: Sendable {
         guard event == "PreToolUse" || event == "PostToolUse" || event == "PermissionRequest" else {
             return false
         }
+        return isQoderWorkClient
+    }
 
+    nonisolated var isQoderWorkNotifyOnlyPermissionRequest: Bool {
+        event == "PermissionRequest"
+            && isQoderWorkClient
+            && !isAskUserQuestionRequest
+    }
+
+    private nonisolated var isQoderWorkClient: Bool {
         let normalizedClientInfo = clientInfo.normalizedForClaudeRouting()
         if normalizedClientInfo.profileID == "qoderwork" {
             return true
@@ -226,11 +239,11 @@ struct HookEvent: Sendable {
     }
 
     nonisolated var shouldFilterBeforeApprovalHandling: Bool {
-        isQoderWorkNonResponsiveToolEvent
+        isQoderWorkNonResponsiveToolEvent || isQoderWorkNotifyOnlyPermissionRequest
     }
 
     nonisolated var shouldSuppressApprovalHandling: Bool {
-        bridgeExpectsResponse == false
+        bridgeExpectsResponse == false || isQoderWorkNotifyOnlyPermissionRequest
     }
 
     private nonisolated var isCodeBuddyCLIAskUserQuestionNotification: Bool {
