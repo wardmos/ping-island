@@ -15,6 +15,11 @@ struct RecentInterventionResponse: Sendable {
 }
 
 struct RecentInterventionResponseStore {
+    private static let questionToolNames: Set<String> = [
+        "askuserquestion",
+        "askfollowupquestion"
+    ]
+
     private let ttl: TimeInterval
     private var responses: [String: RecentInterventionResponse] = [:]
 
@@ -65,17 +70,14 @@ struct RecentInterventionResponseStore {
             return nil
         }
 
-        let normalizedTool = event.tool?
-            .lowercased()
-            .replacingOccurrences(of: "_", with: "")
-            .replacingOccurrences(of: "-", with: "")
-        let effectiveTool = normalizedTool ?? (isCodeBuddyCLIQuestionNotification(event) ? "askuserquestion" : nil)
-        guard effectiveTool == "askuserquestion" else { return nil }
+        let effectiveTool = normalizedQuestionToolName(for: event)
+            ?? (isCodeBuddyCLIQuestionNotification(event) ? "askuserquestion" : nil)
+        guard let effectiveTool, questionToolNames.contains(effectiveTool) else { return nil }
         guard let signature = questionSignature(from: event.toolInput)
             ?? questionSignature(from: updatedInput),
               !signature.isEmpty else { return nil }
 
-        return ([event.sessionId, effectiveTool ?? "askuserquestion"] + signature).joined(separator: "||")
+        return ([event.sessionId, effectiveTool] + signature).joined(separator: "||")
     }
 
     private static func shouldStoreAnswerReplay(for event: HookEvent) -> Bool {
@@ -87,17 +89,16 @@ struct RecentInterventionResponseStore {
             return true
         }
 
-        let normalizedTool = event.tool?
-            .lowercased()
-            .replacingOccurrences(of: "_", with: "")
-            .replacingOccurrences(of: "-", with: "")
+        let normalizedTool = normalizedQuestionToolName(for: event)
         let profileID = event.clientInfo.profileID?.lowercased()
         let bundleIdentifier = event.clientInfo.bundleIdentifier?.lowercased()
         let isPlainClaudeCode = profileID != "qoder"
             && profileID != "qoderwork"
             && bundleIdentifier != "com.qoder.ide"
             && bundleIdentifier != "com.qoder.work"
-        return event.provider == .claude && normalizedTool == "askuserquestion" && isPlainClaudeCode
+        return event.provider == .claude
+            && normalizedTool.map { Self.questionToolNames.contains($0) } == true
+            && isPlainClaudeCode
     }
 
     private static func shouldReplayAnswer(for event: HookEvent) -> Bool {
@@ -105,10 +106,7 @@ struct RecentInterventionResponseStore {
             return true
         }
 
-        let normalizedTool = event.tool?
-            .lowercased()
-            .replacingOccurrences(of: "_", with: "")
-            .replacingOccurrences(of: "-", with: "")
+        let normalizedTool = normalizedQuestionToolName(for: event)
         let profileID = event.clientInfo.profileID?.lowercased()
         let bundleIdentifier = event.clientInfo.bundleIdentifier?.lowercased()
         let isPlainClaudeCode = profileID != "qoder"
@@ -117,7 +115,7 @@ struct RecentInterventionResponseStore {
             && bundleIdentifier != "com.qoder.work"
         return event.provider == .claude
             && event.event == "PermissionRequest"
-            && normalizedTool == "askuserquestion"
+            && normalizedTool.map { Self.questionToolNames.contains($0) } == true
             && isPlainClaudeCode
     }
 
@@ -136,6 +134,19 @@ struct RecentInterventionResponseStore {
         return normalizedMessage.contains("askuserquestion")
             || normalizedMessage.contains("ask user question")
             || normalizedMessage.contains("ask_user_question")
+            || normalizedMessage.contains("askfollowupquestion")
+            || normalizedMessage.contains("ask followup question")
+            || normalizedMessage.contains("ask_followup_question")
+    }
+
+    private static func normalizedQuestionToolName(for event: HookEvent) -> String? {
+        guard let tool = event.tool else { return nil }
+        let normalized = tool
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .replacingOccurrences(of: "_", with: "")
+            .replacingOccurrences(of: "-", with: "")
+        return normalized.isEmpty ? nil : normalized
     }
 
     static func questionSignature(from toolInput: [String: AnyCodable]?) -> [String]? {

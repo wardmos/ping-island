@@ -63,6 +63,7 @@ actor SessionStore {
     private var codexRolloutParsesInFlight: Set<String> = []
     private var codexSessionAliases: [String: String] = [:]
     private var ignoredCodexAuxiliaryHookSessionIds: Set<String> = []
+    private var resolvedQuestionInterventionReplaysBySession: [String: [String: ResolvedQuestionInterventionReplay]] = [:]
 
     /// Sync debounce interval (100ms)
     private let syncDebounceNs: UInt64 = 100_000_000
@@ -90,6 +91,14 @@ actor SessionStore {
     private var pendingHookResponseCancellationHandler: @Sendable (String, SessionIngress) -> Void = {
         SessionStore.cancelPendingHookResponse(toolUseId: $0, ingress: $1)
     }
+    private var resolvedQuestionReplayResponseHandler:
+        @Sendable (SessionIngress, String, [String: AnyCodable]?) -> Void = {
+            SessionStore.respondToResolvedQuestionReplay(
+                ingress: $0,
+                toolUseId: $1,
+                updatedInput: $2
+            )
+        }
 
     /// Periodic sweep that removes sessions whose Claude process has died
     /// without delivering `SessionEnd` (Ctrl-C kill, OOM, terminal closed) and
@@ -224,6 +233,18 @@ actor SessionStore {
     ) {
         pendingHookResponseCancellationHandler = handler ?? {
             SessionStore.cancelPendingHookResponse(toolUseId: $0, ingress: $1)
+        }
+    }
+
+    func setResolvedQuestionReplayResponseHandlerForTesting(
+        _ handler: (@Sendable (SessionIngress, String, [String: AnyCodable]?) -> Void)?
+    ) {
+        resolvedQuestionReplayResponseHandler = handler ?? {
+            SessionStore.respondToResolvedQuestionReplay(
+                ingress: $0,
+                toolUseId: $1,
+                updatedInput: $2
+            )
         }
     }
 
@@ -428,6 +449,8 @@ actor SessionStore {
         }
 
         let tree = (event.pid != nil || event.tty != nil) ? ProcessTreeBuilder.shared.buildTree() : [:]
+        let hadActiveClaudeQuestion = session.intervention?.kind == .question
+            && session.clientInfo.isPlainClaudeCodeRouting
 
         session.provider = event.provider
         session.clientInfo = session.clientInfo.merged(with: event.clientInfo)
@@ -513,7 +536,8 @@ actor SessionStore {
             cancelOrphanedPendingHookResponse(
                 previousPendingHookResponse,
                 in: &session,
-                reason: event.event
+                reason: event.event,
+                preserveClaudeQuestion: false
             )
             sessions[sessionId] = session
             syncLinkedQoderChildSessions(for: session)
@@ -547,10 +571,30 @@ actor SessionStore {
             for: event,
             session: session
         )
+        let hookIntervention = event.intervention
+        if let resolvedQuestionReplay = resolvedQuestionInterventionReplay(
+            for: hookIntervention,
+            event: event,
+            in: session
+        ) {
+            Self.logger.notice(
+                "Ignoring already resolved Claude question session=\(sessionId, privacy: .public) tool=\((event.toolUseId ?? "").prefix(12), privacy: .public)"
+            )
+            respondToResolvedQuestionReplay(
+                resolvedQuestionReplay,
+                intervention: hookIntervention,
+                event: event,
+                session: session
+            )
+            sessions[sessionId] = session
+            syncLinkedQoderChildSessions(for: session)
+            await AgentUsageStore.shared.recordHookEvent(event, resolvedSessionID: sessionId)
+            return
+        }
         let newPhase: SessionPhase = shouldPreserveEndedStopForAnsweredQuestion || codeBuddyCLINotificationIntervention != nil
             ? .waitingForInput
             : event.determinePhase()
-        let intervention = codeBuddyCLINotificationIntervention ?? event.intervention
+        let intervention = codeBuddyCLINotificationIntervention ?? hookIntervention
         let shouldPreserveQwenQuestionIntervention = shouldPreserveQwenQuestionIntervention(
             for: event,
             newPhase: newPhase,
@@ -569,11 +613,13 @@ actor SessionStore {
             for: event,
             session: session
         )
-        let shouldClearCurrentIntervention = shouldClearIntervention(
-            for: event,
-            newPhase: newPhase,
-            currentIntervention: session.intervention
-        )
+        let shouldClearCurrentIntervention = (hadActiveClaudeQuestion && event.event == "Notification")
+            ? false
+            : shouldClearIntervention(
+                for: event,
+                newPhase: newPhase,
+                currentIntervention: session.intervention
+            )
         let hasIncomingIntervention: Bool
         if case .some = intervention {
             hasIncomingIntervention = true
@@ -679,7 +725,8 @@ actor SessionStore {
         cancelOrphanedPendingHookResponse(
             previousPendingHookResponse,
             in: &session,
-            reason: event.event
+            reason: event.event,
+            preserveClaudeQuestion: hadActiveClaudeQuestion
         )
 
         sessions[sessionId] = session
@@ -1165,6 +1212,11 @@ actor SessionStore {
         let ingress: SessionIngress
     }
 
+    private struct ResolvedQuestionInterventionReplay {
+        let toolUseId: String
+        let submittedAnswers: [String: [String]]
+    }
+
     private nonisolated static func cancelPendingHookResponse(
         toolUseId: String,
         ingress: SessionIngress
@@ -1181,6 +1233,30 @@ actor SessionStore {
             case .codexAppServer, .nativeRuntime, .desktopAppMonitor:
                 break
             }
+        }
+    }
+
+    private nonisolated static func respondToResolvedQuestionReplay(
+        ingress: SessionIngress,
+        toolUseId: String,
+        updatedInput: [String: AnyCodable]?
+    ) {
+        let rawUpdatedInput = updatedInput?.mapValues { $0.value }
+        switch ingress {
+        case .remoteBridge:
+            RemoteConnectorManager.shared.respondToIntervention(
+                toolUseId: toolUseId,
+                decision: "answer",
+                updatedInput: rawUpdatedInput
+            )
+        case .hookBridge:
+            HookSocketServer.shared.respondToIntervention(
+                toolUseId: toolUseId,
+                decision: "answer",
+                updatedInput: rawUpdatedInput
+            )
+        case .codexAppServer, .nativeRuntime, .desktopAppMonitor:
+            break
         }
     }
 
@@ -1256,6 +1332,138 @@ actor SessionStore {
         }
     }
 
+    private func recordResolvedQuestionIntervention(
+        _ intervention: SessionIntervention,
+        submittedAnswers: [String: [String]],
+        in session: SessionState
+    ) {
+        guard shouldTrackResolvedQuestionIntervention(intervention, in: session),
+              let key = resolvedQuestionInterventionKey(for: intervention),
+              let toolUseId = resolvedQuestionInterventionToolUseId(for: intervention) else {
+            return
+        }
+
+        resolvedQuestionInterventionReplaysBySession[session.sessionId, default: [:]][key] =
+            ResolvedQuestionInterventionReplay(
+                toolUseId: toolUseId,
+                submittedAnswers: submittedAnswers
+            )
+    }
+
+    private func resolvedQuestionInterventionReplay(
+        _ intervention: SessionIntervention?,
+        event: HookEvent,
+        in session: SessionState
+    ) -> ResolvedQuestionInterventionReplay? {
+        guard let intervention,
+              event.provider == .claude,
+              event.event == "PermissionRequest",
+              shouldTrackResolvedQuestionIntervention(intervention, in: session),
+              event.clientInfo.isPlainClaudeCodeRouting,
+              let key = resolvedQuestionInterventionKey(for: intervention) else {
+            return nil
+        }
+
+        return resolvedQuestionInterventionReplaysBySession[session.sessionId]?[key]
+    }
+
+    private func respondToResolvedQuestionReplay(
+        _ replay: ResolvedQuestionInterventionReplay,
+        intervention: SessionIntervention?,
+        event: HookEvent,
+        session: SessionState
+    ) {
+        let updatedInput: [String: Any]?
+        if let intervention,
+           let rawJSON = intervention.metadata["toolInputJSON"] ?? intervention.metadata["tool_input_json"] {
+            updatedInput = SessionMonitor.updatedHookToolInput(
+                rawJSON: rawJSON,
+                answers: replay.submittedAnswers,
+                clientInfo: session.clientInfo
+            )
+        } else {
+            updatedInput = nil
+        }
+
+        let toolUseId = event.toolUseId ?? replay.toolUseId
+        let encodedUpdatedInput = updatedInput?.mapValues { AnyCodable($0) }
+        resolvedQuestionReplayResponseHandler(session.ingress, toolUseId, encodedUpdatedInput)
+    }
+
+    private nonisolated func shouldTrackResolvedQuestionIntervention(
+        _ intervention: SessionIntervention,
+        in session: SessionState
+    ) -> Bool {
+        intervention.kind == .question
+            && intervention.supportsInlineResponse
+            && session.provider == .claude
+            && session.clientInfo.isPlainClaudeCodeRouting
+    }
+
+    private nonisolated func resolvedQuestionInterventionKey(for intervention: SessionIntervention) -> String? {
+        guard intervention.kind == .question else { return nil }
+
+        let toolUseId = resolvedQuestionInterventionMetadataToolUseId(for: intervention)
+        if let toolUseId {
+            return "tool:\(toolUseId)"
+        }
+
+        let questionSignature = intervention.resolvedQuestions
+            .map(\.mergeSignature)
+            .joined(separator: "||")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !questionSignature.isEmpty else { return nil }
+
+        let toolName = normalizedQuestionToolName(for: intervention) ?? "question"
+        return "question:\(toolName):\(questionSignature)"
+    }
+
+    private nonisolated func resolvedQuestionInterventionMetadataToolUseId(for intervention: SessionIntervention) -> String? {
+        [
+            intervention.metadata["originalToolUseId"],
+            intervention.metadata["toolUseId"],
+            intervention.metadata["tool_use_id"]
+        ]
+        .compactMap { value -> String? in
+            guard let value else { return nil }
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
+        }
+        .first
+    }
+
+    private nonisolated func resolvedQuestionInterventionToolUseId(for intervention: SessionIntervention) -> String? {
+        [
+            intervention.metadata["originalToolUseId"],
+            intervention.metadata["toolUseId"],
+            intervention.metadata["tool_use_id"],
+            intervention.id
+        ]
+        .compactMap { value -> String? in
+            guard let value else { return nil }
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
+        }
+        .first
+    }
+
+    private nonisolated func normalizedQuestionToolName(for intervention: SessionIntervention) -> String? {
+        [
+            intervention.metadata["toolName"],
+            intervention.metadata["tool_name"]
+        ]
+        .compactMap { value -> String? in
+            guard let value else { return nil }
+            let normalized = value
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased()
+                .replacingOccurrences(of: "_", with: "")
+                .replacingOccurrences(of: "-", with: "")
+            return normalized.isEmpty ? nil : normalized
+        }
+        .first
+    }
+
     private nonisolated func interventionsMatch(
         _ lhs: SessionIntervention,
         _ rhs: SessionIntervention
@@ -1313,10 +1521,15 @@ actor SessionStore {
     private func cancelOrphanedPendingHookResponse(
         _ previous: PendingHookResponse?,
         in session: inout SessionState,
-        reason: String
+        reason: String,
+        preserveClaudeQuestion: Bool
     ) {
         guard let previous,
               !isPendingHookResponseVisible(previous, in: session) else {
+            return
+        }
+
+        if reason == "Notification", preserveClaudeQuestion {
             return
         }
 
@@ -1782,6 +1995,14 @@ actor SessionStore {
         submittedAnswers: [String: [String]]?
     ) async {
         guard var session = sessions[sessionId] else { return }
+        if let intervention = session.intervention,
+           let submittedAnswers {
+            recordResolvedQuestionIntervention(
+                intervention,
+                submittedAnswers: submittedAnswers,
+                in: session
+            )
+        }
         if let intervention = session.intervention,
            shouldAwaitExternalContinuationAfterResolving(intervention, in: session) {
             removePendingIntervention(intervention, from: &session)
@@ -2509,8 +2730,10 @@ actor SessionStore {
             .filter { $0.linkedParentSessionId == resolvedSessionId }
             .map(\.sessionId)
         sessions.removeValue(forKey: resolvedSessionId)
+        resolvedQuestionInterventionReplaysBySession.removeValue(forKey: resolvedSessionId)
         for childSessionId in linkedChildSessionIDs {
             sessions.removeValue(forKey: childSessionId)
+            resolvedQuestionInterventionReplaysBySession.removeValue(forKey: childSessionId)
         }
         clearCodexSessionAliases(for: resolvedSessionId)
         cancelPendingSync(sessionId: resolvedSessionId)
@@ -4764,6 +4987,10 @@ actor SessionStore {
 
         let normalizedClientInfo = event.clientInfo.normalizedForClaudeRouting()
         let profileID = normalizedClientInfo.profileID?.lowercased()
+        if normalizedClientInfo.isPlainClaudeCodeRouting {
+            return false
+        }
+
         if profileID == "qoder-cli"
             || profileID == "codebuddy-cli"
             || profileID == "qwen-code"

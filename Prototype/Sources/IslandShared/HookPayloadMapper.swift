@@ -61,6 +61,7 @@ public enum HookPayloadMapper {
         let expectsResponse = runtimeConfig.routePromptsToTerminal
             ? false
             : detectExpectsResponse(
+                provider: source,
                 eventType: eventType,
                 payload: payload,
                 clientKind: clientKind,
@@ -462,6 +463,7 @@ public enum HookPayloadMapper {
     }
 
     private static func detectExpectsResponse(
+        provider: AgentProvider,
         eventType: String,
         payload: [String: Any],
         clientKind: String?,
@@ -481,6 +483,7 @@ public enum HookPayloadMapper {
                 return true
             case .question:
                 return shouldSurfaceQuestionIntervention(
+                    provider: provider,
                     eventType: eventType,
                     payload: payload,
                     clientKind: clientKind
@@ -766,14 +769,13 @@ public enum HookPayloadMapper {
             )
         }
 
-        if let questions = questionPayloads(from: payload), !questions.isEmpty {
-            guard shouldSurfaceQuestionIntervention(
+        if let questions = questionPayloads(from: payload), !questions.isEmpty,
+           shouldSurfaceQuestionIntervention(
+                provider: provider,
                 eventType: eventType,
                 payload: payload,
                 clientKind: clientKind
-            ) else {
-                return nil
-            }
+           ) {
             if clientKind == "qoder",
                isQoderQuestionToolEvent(eventType: eventType, payload: payload) {
                 return nil
@@ -1602,6 +1604,7 @@ public enum HookPayloadMapper {
     }
 
     private static func shouldSurfaceQuestionIntervention(
+        provider: AgentProvider,
         eventType: String,
         payload: [String: Any],
         clientKind: String?
@@ -1620,7 +1623,18 @@ public enum HookPayloadMapper {
                 || isQoderWorkPermissionQuestionEvent(eventType: eventType, payload: payload)
         }
 
-        return eventType == "PreToolUse" || eventType == "UserInputRequest"
+        if clientKind == nil {
+            if provider == .claude {
+                return eventType == "UserInputRequest"
+                    || isQoderWorkPermissionQuestionEvent(eventType: eventType, payload: payload)
+            }
+            return isQoderWorkPreToolQuestionEvent(eventType: eventType, payload: payload)
+                || isQoderWorkPermissionQuestionEvent(eventType: eventType, payload: payload)
+                || eventType == "UserInputRequest"
+        }
+
+        return isQoderWorkPreToolQuestionEvent(eventType: eventType, payload: payload)
+            || eventType == "UserInputRequest"
     }
 
     private static func isCodeBuddyCLIAskUserQuestionNotification(

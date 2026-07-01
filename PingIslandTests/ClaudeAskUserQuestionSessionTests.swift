@@ -2,7 +2,7 @@ import XCTest
 @testable import Ping_Island
 
 final class ClaudeAskUserQuestionSessionTests: XCTestCase {
-    func testPreToolUseQuestionImmediatelyEntersWaitingForInput() async {
+    func testPermissionRequestQuestionImmediatelyEntersWaitingForInput() async {
         let sessionId = "claude-question-\(UUID().uuidString)"
         let store = SessionStore.shared
 
@@ -15,6 +15,13 @@ final class ClaudeAskUserQuestionSessionTests: XCTestCase {
         XCTAssertTrue(session?.intervention?.resolvedQuestions.first?.allowsOther ?? false)
 
         await store.process(.sessionArchived(sessionId: sessionId))
+    }
+
+    func testPreToolUseQuestionDoesNotBlockPlainClaudeCode() {
+        let event = makeClaudePreToolUseQuestionEvent(sessionId: "claude-pretool-\(UUID().uuidString)")
+
+        XCTAssertFalse(event.expectsResponse)
+        XCTAssertFalse(event.isAskUserQuestionRequest)
     }
 
     func testDuplicatePermissionRequestKeepsClaudeQuestionInWaitingForInput() async {
@@ -36,6 +43,7 @@ final class ClaudeAskUserQuestionSessionTests: XCTestCase {
     func testDuplicatePermissionRequestDoesNotRestoreApprovalAfterAnswer() async {
         let sessionId = "claude-answer-\(UUID().uuidString)"
         let store = SessionStore.shared
+        let replays = ResolvedQuestionReplayRecorder()
 
         await store.process(.hookReceived(makeClaudeQuestionEvent(sessionId: sessionId)))
         await store.process(
@@ -45,7 +53,45 @@ final class ClaudeAskUserQuestionSessionTests: XCTestCase {
                 submittedAnswers: ["project": ["会话层"]]
             )
         )
+        await store.setResolvedQuestionReplayResponseHandlerForTesting { ingress, toolUseId, updatedInput in
+            replays.record(ingress: ingress, toolUseId: toolUseId, updatedInput: updatedInput)
+        }
         await store.process(.hookReceived(makeClaudePermissionRequest(sessionId: sessionId)))
+        await store.setResolvedQuestionReplayResponseHandlerForTesting(nil)
+
+        let session = await store.session(for: sessionId)
+        XCTAssertEqual(session?.phase, .processing)
+        XCTAssertNil(session?.intervention)
+        XCTAssertNil(session?.activePermission)
+        XCTAssertEqual(replays.toolUseIds, ["toolu_\(sessionId)"])
+        XCTAssertTrue(replays.answerValues.contains("会话层"))
+
+        await store.process(.sessionArchived(sessionId: sessionId))
+    }
+
+    func testDuplicateFollowupPermissionRequestDoesNotRestoreQuestionAfterAnswer() async {
+        let sessionId = "claude-followup-answer-\(UUID().uuidString)"
+        let store = SessionStore.shared
+
+        await store.process(.hookReceived(makeClaudeQuestionEvent(
+            sessionId: sessionId,
+            tool: "AskFollowupQuestion",
+            questionId: "followup",
+            question: "还要继续处理哪里？"
+        )))
+        await store.process(
+            .interventionResolved(
+                sessionId: sessionId,
+                nextPhase: .processing,
+                submittedAnswers: ["followup": ["会话层"]]
+            )
+        )
+        await store.process(.hookReceived(makeClaudePermissionRequest(
+            sessionId: sessionId,
+            tool: "AskFollowupQuestion",
+            questionId: "followup",
+            question: "还要继续处理哪里？"
+        )))
 
         let session = await store.session(for: sessionId)
         XCTAssertEqual(session?.phase, .processing)
@@ -488,14 +534,15 @@ final class ClaudeAskUserQuestionSessionTests: XCTestCase {
     private func makeClaudeQuestionEvent(
         sessionId: String,
         toolUseId: String? = nil,
+        tool: String = "AskUserQuestion",
         questionId: String = "project",
         question: String = "你想先处理哪个模块？"
     ) -> HookEvent {
         HookEvent(
             sessionId: sessionId,
             cwd: "/tmp/project",
-            event: "PreToolUse",
-            status: "waiting_for_input",
+            event: "PermissionRequest",
+            status: "waiting_for_approval",
             provider: .claude,
             clientInfo: SessionClientInfo(
                 kind: .claudeCode,
@@ -505,7 +552,7 @@ final class ClaudeAskUserQuestionSessionTests: XCTestCase {
             ),
             pid: nil,
             tty: nil,
-            tool: "AskUserQuestion",
+            tool: tool,
             toolInput: [
                 "questions": AnyCodable([
                     [
@@ -525,12 +572,12 @@ final class ClaudeAskUserQuestionSessionTests: XCTestCase {
         )
     }
 
-    private func makeClaudePermissionRequest(sessionId: String) -> HookEvent {
+    private func makeClaudePreToolUseQuestionEvent(sessionId: String) -> HookEvent {
         HookEvent(
             sessionId: sessionId,
             cwd: "/tmp/project",
-            event: "PermissionRequest",
-            status: "waiting_for_approval",
+            event: "PreToolUse",
+            status: "waiting_for_input",
             provider: .claude,
             clientInfo: SessionClientInfo(
                 kind: .claudeCode,
@@ -547,6 +594,46 @@ final class ClaudeAskUserQuestionSessionTests: XCTestCase {
                         "id": "project",
                         "header": "方向",
                         "question": "你想先处理哪个模块？",
+                        "options": [
+                            ["label": "会话层"],
+                            ["label": "UI 层"]
+                        ]
+                    ]
+                ])
+            ],
+            toolUseId: "toolu_\(sessionId)",
+            notificationType: nil,
+            message: nil
+        )
+    }
+
+    private func makeClaudePermissionRequest(
+        sessionId: String,
+        tool: String = "AskUserQuestion",
+        questionId: String = "project",
+        question: String = "你想先处理哪个模块？"
+    ) -> HookEvent {
+        HookEvent(
+            sessionId: sessionId,
+            cwd: "/tmp/project",
+            event: "PermissionRequest",
+            status: "waiting_for_approval",
+            provider: .claude,
+            clientInfo: SessionClientInfo(
+                kind: .claudeCode,
+                profileID: "claude_code",
+                name: "Claude Code",
+                bundleIdentifier: "com.anthropic.claudecode"
+            ),
+            pid: nil,
+            tty: nil,
+            tool: tool,
+            toolInput: [
+                "questions": AnyCodable([
+                    [
+                        "id": questionId,
+                        "header": "方向",
+                        "question": question,
                         "options": [
                             ["label": "会话层"],
                             ["label": "UI 层"]
@@ -976,6 +1063,40 @@ private final class CancellationRecorder: @unchecked Sendable {
     func record(toolUseId: String, ingress: SessionIngress) {
         lock.lock()
         records.append((toolUseId, ingress))
+        lock.unlock()
+    }
+}
+
+private final class ResolvedQuestionReplayRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var records: [(ingress: SessionIngress, toolUseId: String, updatedInput: [String: AnyCodable]?)] = []
+
+    var toolUseIds: [String] {
+        lock.lock()
+        defer { lock.unlock() }
+        return records.map { $0.toolUseId }
+    }
+
+    var answerValues: [String] {
+        lock.lock()
+        defer { lock.unlock() }
+        return records.flatMap { record -> [String] in
+            guard let answers = record.updatedInput?["answers"]?.value as? [String: Any] else { return [] }
+            return answers.values.flatMap { value -> [String] in
+                if let string = value as? String {
+                    return [string]
+                }
+                if let strings = value as? [String] {
+                    return strings
+                }
+                return []
+            }
+        }
+    }
+
+    func record(ingress: SessionIngress, toolUseId: String, updatedInput: [String: AnyCodable]?) {
+        lock.lock()
+        records.append((ingress, toolUseId, updatedInput))
         lock.unlock()
     }
 }
