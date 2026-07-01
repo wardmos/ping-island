@@ -626,8 +626,13 @@ final class RemoteConnectorManager: ObservableObject {
                 toolUseId: resolvedToolUseID,
                 notificationType: payload.notificationType,
                 message: payload.message,
-                ingress: .remoteBridge
+                ingress: .remoteBridge,
+                bridgeExpectsResponse: payload.expectsResponse
             )
+
+            if event.shouldFilterBeforeApprovalHandling {
+                return
+            }
 
             if payload.expectsResponse, let toolUseID = resolvedToolUseID {
                 pendingRequests.append(PendingRemoteRequest(

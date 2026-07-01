@@ -218,6 +218,63 @@ public struct BridgeEnvelope: Codable, Equatable, Sendable, Identifiable {
         self.metadata = metadata
         self.sentAt = sentAt
     }
+
+    public var shouldFilterBeforeApprovalHandling: Bool {
+        isQoderWorkNonResponsiveToolEvent || isQoderWorkNotifyOnlyPermissionRequest
+    }
+
+    public var isQoderWorkNonResponsiveToolEvent: Bool {
+        guard expectsResponse == false else { return false }
+        guard eventType == "PreToolUse" || eventType == "PostToolUse" || eventType == "PermissionRequest" else {
+            return false
+        }
+        return isQoderWorkClient
+    }
+
+    public var isQoderWorkNotifyOnlyPermissionRequest: Bool {
+        guard eventType == "PermissionRequest", isQoderWorkClient else { return false }
+        if intervention?.kind == .question {
+            return false
+        }
+        if BridgeEnvelope.questionToolNames.contains(normalizedToolName ?? "") {
+            return false
+        }
+        return true
+    }
+
+    private static let questionToolNames: Set<String> = [
+        "askuserquestion",
+        "askfollowupquestion"
+    ]
+
+    private var normalizedToolName: String? {
+        let rawToolName = metadata["tool_name"] ?? title
+        return rawToolName?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "_", with: "")
+            .replacingOccurrences(of: "-", with: "")
+            .lowercased()
+    }
+
+    private var isQoderWorkClient: Bool {
+        let normalizedClientKind = metadata["client_kind"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        if normalizedClientKind == "qoderwork" {
+            return true
+        }
+
+        return [
+            terminalContext.terminalBundleID,
+            terminalContext.ideBundleID,
+            metadata["terminal_bundle_id"],
+            metadata["client_bundle_id"]
+        ].contains { value in
+            value?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased() == "com.qoder.work"
+        }
+    }
 }
 
 public indirect enum JSONValue: Codable, Equatable, Sendable {

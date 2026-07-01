@@ -2,6 +2,146 @@ import XCTest
 @testable import Ping_Island
 
 final class QoderWorkHookEventTimingTests: XCTestCase {
+    func testQoderWorkNonResponsiveToolUseDoesNotSurfaceApproval() {
+        let bridgeIntervention = SessionIntervention(
+            id: "call_todo",
+            kind: .approval,
+            title: "QoderWork needs approval",
+            message: "TodoWrite",
+            options: [],
+            questions: [],
+            supportsSessionScope: false,
+            metadata: ["tool_name": "TodoWrite"]
+        )
+        let event = HookEvent(
+            sessionId: "qoderwork-session",
+            cwd: "/tmp/project",
+            event: "PreToolUse",
+            status: "waiting_for_approval",
+            provider: .claude,
+            clientInfo: SessionClientInfo(
+                kind: .qoder,
+                profileID: "qoderwork",
+                name: "QoderWork",
+                bundleIdentifier: "com.qoder.work",
+                terminalBundleIdentifier: "com.qoder.work"
+            ),
+            pid: nil,
+            tty: nil,
+            tool: "TodoWrite",
+            toolInput: [
+                "todos": AnyCodable([
+                    [
+                        "description": "Search recent AI news",
+                        "status": "in_progress"
+                    ]
+                ])
+            ],
+            toolUseId: "call_todo",
+            notificationType: nil,
+            message: nil,
+            bridgeIntervention: bridgeIntervention,
+            bridgeExpectsResponse: false
+        )
+
+        XCTAssertFalse(event.expectsResponse)
+        XCTAssertNil(event.intervention)
+        XCTAssertEqual(event.determinePhase(), .processing)
+        XCTAssertEqual(event.sessionPhase, .processing)
+        XCTAssertTrue(event.shouldFilterBeforeApprovalHandling)
+    }
+
+    func testQoderWorkPermissionRequestApprovalDoesNotSurfaceApprovalEvenWhenBridgeMarkedResponsive() {
+        let bridgeIntervention = SessionIntervention(
+            id: "websearch-approval",
+            kind: .approval,
+            title: "Claude needs approval",
+            message: "WebSearch",
+            options: [
+                .init(id: "approve", title: "Allow Once", detail: nil),
+                .init(id: "approveForSession", title: "Allow for Session", detail: nil),
+                .init(id: "deny", title: "Deny", detail: nil)
+            ],
+            questions: [],
+            supportsSessionScope: false,
+            metadata: ["tool_name": "WebSearch"]
+        )
+        let event = HookEvent(
+            sessionId: "qoderwork-session",
+            cwd: "/tmp/project",
+            event: "PermissionRequest",
+            status: "waiting_for_approval",
+            provider: .claude,
+            clientInfo: SessionClientInfo(
+                kind: .qoder,
+                profileID: "qoderwork",
+                name: "QoderWork",
+                bundleIdentifier: "com.qoder.work",
+                terminalBundleIdentifier: "com.qoder.work"
+            ),
+            pid: nil,
+            tty: nil,
+            tool: "WebSearch",
+            toolInput: [
+                "query": AnyCodable("AI news latest week June 2026")
+            ],
+            toolUseId: nil,
+            notificationType: nil,
+            message: nil,
+            bridgeIntervention: bridgeIntervention,
+            bridgeExpectsResponse: true
+        )
+
+        XCTAssertFalse(event.isAskUserQuestionRequest)
+        XCTAssertTrue(event.isQoderWorkNotifyOnlyPermissionRequest)
+        XCTAssertFalse(event.expectsResponse)
+        XCTAssertNil(event.intervention)
+        XCTAssertEqual(event.determinePhase(), .processing)
+        XCTAssertEqual(event.sessionPhase, .processing)
+        XCTAssertTrue(event.shouldFilterBeforeApprovalHandling)
+    }
+
+    func testSessionStoreDropsQoderWorkNonResponsiveToolUseBeforeApprovalState() async {
+        let sessionId = "qoderwork-nonresponsive-\(UUID().uuidString)"
+        let event = HookEvent(
+            sessionId: sessionId,
+            cwd: "/tmp/project",
+            event: "PreToolUse",
+            status: "waiting_for_approval",
+            provider: .claude,
+            clientInfo: SessionClientInfo(
+                kind: .qoder,
+                profileID: "qoderwork",
+                name: "QoderWork",
+                bundleIdentifier: "com.qoder.work",
+                terminalBundleIdentifier: "com.qoder.work"
+            ),
+            pid: nil,
+            tty: nil,
+            tool: "TodoWrite",
+            toolInput: ["todos": AnyCodable([["description": "Search recent AI news", "status": "in_progress"]])],
+            toolUseId: "call_todo",
+            notificationType: nil,
+            message: nil,
+            bridgeIntervention: SessionIntervention(
+                id: "call_todo",
+                kind: .approval,
+                title: "QoderWork needs approval",
+                message: "TodoWrite",
+                options: [],
+                questions: [],
+                supportsSessionScope: false,
+                metadata: ["tool_name": "TodoWrite"]
+            ),
+            bridgeExpectsResponse: false
+        )
+
+        await SessionStore.shared.process(.hookReceived(event))
+
+        let session = await SessionStore.shared.session(for: sessionId)
+        XCTAssertNil(session)
+    }
+
     func testQoderWorkPreToolUseQuestionSurfacesIntervention() {
         let event = HookEvent(
             sessionId: "qoderwork-session",
@@ -42,6 +182,7 @@ final class QoderWorkHookEventTimingTests: XCTestCase {
         XCTAssertEqual(event.intervention?.metadata["responseMode"], "external_only")
         XCTAssertTrue(event.intervention?.message.contains("暂不支持直接提交") ?? false)
         XCTAssertEqual(event.determinePhase(), .waitingForInput)
+        XCTAssertFalse(event.shouldFilterBeforeApprovalHandling)
     }
 
     func testQoderWorkPermissionRequestQuestionReusesStableInterventionID() {

@@ -37,6 +37,39 @@ func sessionStorePrioritizesAttentionSessions() async throws {
 }
 
 @Test
+func qoderWorkNonResponsiveToolInterventionIsFilteredBeforeApprovalHandling() throws {
+    let envelope = BridgeEnvelope(
+        provider: .claude,
+        eventType: "PreToolUse",
+        sessionKey: "claude:qoderwork",
+        title: "TodoWrite",
+        preview: "TodoWrite updates todos",
+        cwd: "/tmp/project",
+        status: SessionStatus(kind: .runningTool),
+        terminalContext: TerminalContext(
+            ideName: "QoderWork",
+            ideBundleID: "com.qoder.work"
+        ),
+        intervention: InterventionRequest(
+            sessionID: "claude:qoderwork",
+            kind: .approval,
+            title: "QoderWork needs approval",
+            message: "TodoWrite"
+        ),
+        expectsResponse: false,
+        metadata: [
+            "client_kind": "qoderwork",
+            "client_name": "QoderWork",
+            "terminal_bundle_id": "com.qoder.work",
+            "tool_name": "TodoWrite"
+        ]
+    )
+
+    #expect(envelope.shouldFilterBeforeApprovalHandling)
+    #expect(HookPayloadMapper.shouldDeliverEnvelope(envelope) == false)
+}
+
+@Test
 func sessionStoreAssignsDefaultTitleAndSelectionForNewCodexSessions() async throws {
     let recorder = await MainActor.run { SnapshotRecorder() }
     let store = SessionStore { snapshot in

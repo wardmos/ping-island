@@ -107,6 +107,10 @@ actor SocketServer {
             }
 
             let envelope = try BridgeCodec.decodeEnvelope(data)
+            if envelope.shouldFilterBeforeApprovalHandling {
+                return
+            }
+
             await sessionStore.ingest(envelope)
 
             var response = BridgeResponse(requestID: envelope.id)

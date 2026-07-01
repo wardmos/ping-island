@@ -327,7 +327,7 @@ extension HookEvent {
     }
 
     nonisolated var intervention: SessionIntervention? {
-        if suppressInAppPrompt {
+        if suppressInAppPrompt || shouldSuppressApprovalHandling {
             return nil
         }
         if let bridgeIntervention,
@@ -598,6 +598,11 @@ extension HookEvent {
             return .waitingForInput
         }
 
+        if shouldSuppressApprovalHandling,
+           status == "waiting_for_approval" {
+            return .processing
+        }
+
         // Permission request creates waitingForApproval state
         if expectsResponse {
             let resolvedToolName = tool
@@ -618,6 +623,9 @@ extension HookEvent {
 
         switch status {
         case "waiting_for_approval":
+            if shouldSuppressApprovalHandling {
+                return .processing
+            }
             return .waitingForApproval(PermissionContext(
                 toolUseId: toolUseId ?? "",
                 toolName: tool ?? "unknown",

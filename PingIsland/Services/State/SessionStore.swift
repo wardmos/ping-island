@@ -365,6 +365,13 @@ actor SessionStore {
     }
 
     private func processHookEvent(_ event: HookEvent) async {
+        if event.shouldFilterBeforeApprovalHandling {
+            Self.logger.debug(
+                "Filtering non-responsive QoderWork hook before session state event=\(event.event, privacy: .public) session=\(event.sessionId.prefix(8), privacy: .public)"
+            )
+            return
+        }
+
         if shouldDropIgnoredCodexAuxiliaryHookEvent(event) {
             return
         }
@@ -4779,13 +4786,10 @@ actor SessionStore {
                 ?? normalizedClientInfo.bundleIdentifier
         )?.lowercased()
         if profileID == "qoder"
-            || bundleIdentifier == "com.qoder.ide" {
-            return false
-        }
-
-        if profileID == "qoderwork"
+            || profileID == "qoderwork"
+            || bundleIdentifier == "com.qoder.ide"
             || bundleIdentifier == "com.qoder.work" {
-            return true
+            return false
         }
 
         return normalizedTool == "askuserquestion"
