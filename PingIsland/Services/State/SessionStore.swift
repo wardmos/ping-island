@@ -428,6 +428,8 @@ actor SessionStore {
         }
 
         let tree = (event.pid != nil || event.tty != nil) ? ProcessTreeBuilder.shared.buildTree() : [:]
+        let hadActiveClaudeQuestion = session.intervention?.kind == .question
+            && session.clientInfo.isPlainClaudeCodeRouting
 
         session.provider = event.provider
         session.clientInfo = session.clientInfo.merged(with: event.clientInfo)
@@ -513,7 +515,8 @@ actor SessionStore {
             cancelOrphanedPendingHookResponse(
                 previousPendingHookResponse,
                 in: &session,
-                reason: event.event
+                reason: event.event,
+                preserveClaudeQuestion: false
             )
             sessions[sessionId] = session
             syncLinkedQoderChildSessions(for: session)
@@ -569,11 +572,13 @@ actor SessionStore {
             for: event,
             session: session
         )
-        let shouldClearCurrentIntervention = shouldClearIntervention(
-            for: event,
-            newPhase: newPhase,
-            currentIntervention: session.intervention
-        )
+        let shouldClearCurrentIntervention = (hadActiveClaudeQuestion && event.event == "Notification")
+            ? false
+            : shouldClearIntervention(
+                for: event,
+                newPhase: newPhase,
+                currentIntervention: session.intervention
+            )
         let hasIncomingIntervention: Bool
         if case .some = intervention {
             hasIncomingIntervention = true
@@ -679,7 +684,8 @@ actor SessionStore {
         cancelOrphanedPendingHookResponse(
             previousPendingHookResponse,
             in: &session,
-            reason: event.event
+            reason: event.event,
+            preserveClaudeQuestion: hadActiveClaudeQuestion
         )
 
         sessions[sessionId] = session
@@ -1313,10 +1319,15 @@ actor SessionStore {
     private func cancelOrphanedPendingHookResponse(
         _ previous: PendingHookResponse?,
         in session: inout SessionState,
-        reason: String
+        reason: String,
+        preserveClaudeQuestion: Bool
     ) {
         guard let previous,
               !isPendingHookResponseVisible(previous, in: session) else {
+            return
+        }
+
+        if reason == "Notification", preserveClaudeQuestion {
             return
         }
 
@@ -4764,6 +4775,10 @@ actor SessionStore {
 
         let normalizedClientInfo = event.clientInfo.normalizedForClaudeRouting()
         let profileID = normalizedClientInfo.profileID?.lowercased()
+        if normalizedClientInfo.isPlainClaudeCodeRouting {
+            return false
+        }
+
         if profileID == "qoder-cli"
             || profileID == "codebuddy-cli"
             || profileID == "qwen-code"
