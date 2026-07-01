@@ -366,6 +366,13 @@ actor SessionStore {
     }
 
     private func processHookEvent(_ event: HookEvent) async {
+        if event.shouldFilterBeforeApprovalHandling {
+            Self.logger.debug(
+                "Filtering non-responsive QoderWork hook before session state event=\(event.event, privacy: .public) session=\(event.sessionId.prefix(8), privacy: .public)"
+            )
+            return
+        }
+
         if shouldDropIgnoredCodexAuxiliaryHookEvent(event) {
             return
         }

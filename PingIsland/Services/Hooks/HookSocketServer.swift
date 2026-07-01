@@ -134,7 +134,7 @@ struct HookEvent: Sendable {
             return .compacting
         }
 
-        if isQoderWorkNonResponsiveToolEvent,
+        if shouldSuppressApprovalHandling,
            status == "waiting_for_approval" {
             return .processing
         }
@@ -159,6 +159,14 @@ struct HookEvent: Sendable {
     }
 
     nonisolated var expectsResponse: Bool {
+        if bridgeExpectsResponse == false {
+            return false
+        }
+
+        if isQoderWorkNotifyOnlyPermissionRequest {
+            return false
+        }
+
         if isQoderWorkNonResponsiveToolEvent {
             return false
         }
@@ -218,7 +226,16 @@ struct HookEvent: Sendable {
         guard event == "PreToolUse" || event == "PostToolUse" || event == "PermissionRequest" else {
             return false
         }
+        return isQoderWorkClient
+    }
 
+    nonisolated var isQoderWorkNotifyOnlyPermissionRequest: Bool {
+        event == "PermissionRequest"
+            && isQoderWorkClient
+            && !isAskUserQuestionRequest
+    }
+
+    private nonisolated var isQoderWorkClient: Bool {
         let normalizedClientInfo = clientInfo.normalizedForClaudeRouting()
         if normalizedClientInfo.profileID == "qoderwork" {
             return true
@@ -237,7 +254,11 @@ struct HookEvent: Sendable {
     }
 
     nonisolated var shouldFilterBeforeApprovalHandling: Bool {
-        isQoderWorkNonResponsiveToolEvent
+        isQoderWorkNonResponsiveToolEvent || isQoderWorkNotifyOnlyPermissionRequest
+    }
+
+    nonisolated var shouldSuppressApprovalHandling: Bool {
+        bridgeExpectsResponse == false || isQoderWorkNotifyOnlyPermissionRequest
     }
 
     private nonisolated var isCodeBuddyCLIAskUserQuestionNotification: Bool {
@@ -384,7 +405,7 @@ private struct BridgeTerminalContext: Codable, Sendable {
     let tmuxPane: String?
 }
 
-private struct BridgeEnvelope: Codable, Sendable {
+private struct BridgeEnvelope: Decodable, Sendable {
     let id: UUID
     let provider: BridgeProvider
     let eventType: String
@@ -412,6 +433,8 @@ private struct BridgeEnvelope: Codable, Sendable {
         case intervention
         case expectsResponse
         case metadata
+        case clientKind
+        case clientName
         case sentAt
     }
 
@@ -444,6 +467,16 @@ private struct BridgeEnvelope: Codable, Sendable {
         intervention = try container.decodeIfPresent(BridgeEnvelopeIntervention.self, forKey: .intervention)
 
         var decodedMetadata = try container.decodeIfPresent([String: String].self, forKey: .metadata) ?? [:]
+        if decodedMetadata["client_kind"] == nil,
+           let clientKind = try container.decodeIfPresent(String.self, forKey: .clientKind),
+           !clientKind.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            decodedMetadata["client_kind"] = clientKind
+        }
+        if decodedMetadata["client_name"] == nil,
+           let clientName = try container.decodeIfPresent(String.self, forKey: .clientName),
+           !clientName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            decodedMetadata["client_name"] = clientName
+        }
         let expectation = try Self.decodeResponseExpectation(from: container)
         if decodedMetadata["tool_input_json"] == nil,
            let injectedToolInput = expectation.injectedToolInput,

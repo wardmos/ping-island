@@ -1961,6 +1961,82 @@ func qoderWorkClientMetadataCanBeInjectedFromBridgeArguments() throws {
 }
 
 @Test
+func qoderWorkNonResponsiveToolUseSkipsDeliveryBeforeAppApprovalHandling() throws {
+    let payload = """
+    {
+      "hook_event_name": "PreToolUse",
+      "session_id": "qoderwork-todo",
+      "tool_name": "TodoWrite",
+      "tool_use_id": "call_todo",
+      "tool_input": {
+        "todos": [
+          {
+            "description": "Search recent AI news",
+            "status": "in_progress"
+          }
+        ]
+      }
+    }
+    """.data(using: .utf8)!
+
+    let envelope = HookPayloadMapper.makeEnvelope(
+        source: .claude,
+        arguments: ["island-bridge", "--source", "claude", "--client-kind", "qoderwork", "--client-name", "QoderWork"],
+        environment: ["PWD": "/tmp/demo", "__CFBundleIdentifier": "com.qoder.work"],
+        stdinData: payload
+    )
+
+    #expect(envelope.eventType == "PreToolUse")
+    #expect(envelope.status?.kind == .runningTool)
+    #expect(envelope.expectsResponse == false)
+    #expect(envelope.shouldFilterBeforeApprovalHandling)
+    #expect(HookPayloadMapper.shouldDeliverEnvelope(envelope) == false)
+}
+
+@Test
+func qoderWorkPermissionRequestApprovalSkipsDeliveryBeforeAppApprovalHandling() throws {
+    let payload = """
+    {
+      "hook_event_name": "PermissionRequest",
+      "session_id": "qoderwork-websearch",
+      "permission_mode": "default",
+      "tool_name": "WebSearch",
+      "tool_input": {
+        "query": "AI news latest week June 2026"
+      },
+      "permission_suggestions": [
+        {
+          "type": "addRules",
+          "rules": [
+            {
+              "toolName": "WebSearch",
+              "ruleContent": ""
+            }
+          ],
+          "behavior": "allow",
+          "destination": "localSettings"
+        }
+      ]
+    }
+    """.data(using: .utf8)!
+
+    let envelope = HookPayloadMapper.makeEnvelope(
+        source: .claude,
+        arguments: ["island-bridge", "--source", "claude", "--client-kind", "qoderwork", "--client-name", "QoderWork"],
+        environment: ["PWD": "/tmp/demo", "__CFBundleIdentifier": "com.qoder.work"],
+        stdinData: payload
+    )
+
+    #expect(envelope.eventType == "PermissionRequest")
+    #expect(envelope.status?.kind == .active)
+    #expect(envelope.expectsResponse == false)
+    #expect(envelope.intervention == nil)
+    #expect(envelope.isQoderWorkNotifyOnlyPermissionRequest)
+    #expect(envelope.shouldFilterBeforeApprovalHandling)
+    #expect(HookPayloadMapper.shouldDeliverEnvelope(envelope) == false)
+}
+
+@Test
 func qoderWorkPreToolUseQuestionSurfacesVisibleIntervention() throws {
     let payload = """
     {

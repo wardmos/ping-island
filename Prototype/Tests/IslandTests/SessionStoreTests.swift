@@ -66,6 +66,7 @@ func qoderWorkNonResponsiveToolInterventionIsFilteredBeforeApprovalHandling() th
     )
 
     #expect(envelope.shouldFilterBeforeApprovalHandling)
+    #expect(HookPayloadMapper.shouldDeliverEnvelope(envelope) == false)
 }
 
 @Test

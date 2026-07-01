@@ -220,7 +220,7 @@ public struct BridgeEnvelope: Codable, Equatable, Sendable, Identifiable {
     }
 
     public var shouldFilterBeforeApprovalHandling: Bool {
-        isQoderWorkNonResponsiveToolEvent
+        isQoderWorkNonResponsiveToolEvent || isQoderWorkNotifyOnlyPermissionRequest
     }
 
     public var isQoderWorkNonResponsiveToolEvent: Bool {
@@ -228,7 +228,35 @@ public struct BridgeEnvelope: Codable, Equatable, Sendable, Identifiable {
         guard eventType == "PreToolUse" || eventType == "PostToolUse" || eventType == "PermissionRequest" else {
             return false
         }
+        return isQoderWorkClient
+    }
 
+    public var isQoderWorkNotifyOnlyPermissionRequest: Bool {
+        guard eventType == "PermissionRequest", isQoderWorkClient else { return false }
+        if intervention?.kind == .question {
+            return false
+        }
+        if BridgeEnvelope.questionToolNames.contains(normalizedToolName ?? "") {
+            return false
+        }
+        return true
+    }
+
+    private static let questionToolNames: Set<String> = [
+        "askuserquestion",
+        "askfollowupquestion"
+    ]
+
+    private var normalizedToolName: String? {
+        let rawToolName = metadata["tool_name"] ?? title
+        return rawToolName?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "_", with: "")
+            .replacingOccurrences(of: "-", with: "")
+            .lowercased()
+    }
+
+    private var isQoderWorkClient: Bool {
         let normalizedClientKind = metadata["client_kind"]?
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()

@@ -333,7 +333,7 @@ extension HookEvent {
     }
 
     nonisolated var intervention: SessionIntervention? {
-        if suppressInAppPrompt || isQoderWorkNonResponsiveToolEvent {
+        if suppressInAppPrompt || shouldSuppressApprovalHandling {
             return nil
         }
         if let bridgeIntervention,
@@ -604,7 +604,7 @@ extension HookEvent {
             return .waitingForInput
         }
 
-        if isQoderWorkNonResponsiveToolEvent,
+        if shouldSuppressApprovalHandling,
            status == "waiting_for_approval" {
             return .processing
         }
@@ -629,6 +629,9 @@ extension HookEvent {
 
         switch status {
         case "waiting_for_approval":
+            if shouldSuppressApprovalHandling {
+                return .processing
+            }
             return .waitingForApproval(PermissionContext(
                 toolUseId: toolUseId ?? "",
                 toolName: tool ?? "unknown",
