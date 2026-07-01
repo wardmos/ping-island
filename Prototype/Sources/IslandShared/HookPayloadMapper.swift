@@ -770,6 +770,17 @@ public enum HookPayloadMapper {
             )
         }
 
+        if questionPayloads(from: payload)?.isEmpty == false,
+           questionToolNames.contains(normalizedToolName(from: payload) ?? ""),
+           !shouldSurfaceQuestionIntervention(
+                provider: provider,
+                eventType: eventType,
+                payload: payload,
+                clientKind: clientKind
+           ) {
+            return nil
+        }
+
         if let questions = questionPayloads(from: payload), !questions.isEmpty,
            shouldSurfaceQuestionIntervention(
                 provider: provider,
