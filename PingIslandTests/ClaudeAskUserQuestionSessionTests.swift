@@ -43,6 +43,7 @@ final class ClaudeAskUserQuestionSessionTests: XCTestCase {
     func testDuplicatePermissionRequestDoesNotRestoreApprovalAfterAnswer() async {
         let sessionId = "claude-answer-\(UUID().uuidString)"
         let store = SessionStore.shared
+        let replays = ResolvedQuestionReplayRecorder()
 
         await store.process(.hookReceived(makeClaudeQuestionEvent(sessionId: sessionId)))
         await store.process(
@@ -52,12 +53,18 @@ final class ClaudeAskUserQuestionSessionTests: XCTestCase {
                 submittedAnswers: ["project": ["会话层"]]
             )
         )
+        await store.setResolvedQuestionReplayResponseHandlerForTesting { ingress, toolUseId, updatedInput in
+            replays.record(ingress: ingress, toolUseId: toolUseId, updatedInput: updatedInput)
+        }
         await store.process(.hookReceived(makeClaudePermissionRequest(sessionId: sessionId)))
+        await store.setResolvedQuestionReplayResponseHandlerForTesting(nil)
 
         let session = await store.session(for: sessionId)
         XCTAssertEqual(session?.phase, .processing)
         XCTAssertNil(session?.intervention)
         XCTAssertNil(session?.activePermission)
+        XCTAssertEqual(replays.toolUseIds, ["toolu_\(sessionId)"])
+        XCTAssertTrue(replays.answerValues.contains("会话层"))
 
         await store.process(.sessionArchived(sessionId: sessionId))
     }
@@ -1056,6 +1063,40 @@ private final class CancellationRecorder: @unchecked Sendable {
     func record(toolUseId: String, ingress: SessionIngress) {
         lock.lock()
         records.append((toolUseId, ingress))
+        lock.unlock()
+    }
+}
+
+private final class ResolvedQuestionReplayRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var records: [(ingress: SessionIngress, toolUseId: String, updatedInput: [String: AnyCodable]?)] = []
+
+    var toolUseIds: [String] {
+        lock.lock()
+        defer { lock.unlock() }
+        return records.map { $0.toolUseId }
+    }
+
+    var answerValues: [String] {
+        lock.lock()
+        defer { lock.unlock() }
+        return records.flatMap { record -> [String] in
+            guard let answers = record.updatedInput?["answers"]?.value as? [String: Any] else { return [] }
+            return answers.values.flatMap { value -> [String] in
+                if let string = value as? String {
+                    return [string]
+                }
+                if let strings = value as? [String] {
+                    return strings
+                }
+                return []
+            }
+        }
+    }
+
+    func record(ingress: SessionIngress, toolUseId: String, updatedInput: [String: AnyCodable]?) {
+        lock.lock()
+        records.append((ingress, toolUseId, updatedInput))
         lock.unlock()
     }
 }

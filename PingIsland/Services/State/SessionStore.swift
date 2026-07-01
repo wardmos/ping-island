@@ -63,7 +63,7 @@ actor SessionStore {
     private var codexRolloutParsesInFlight: Set<String> = []
     private var codexSessionAliases: [String: String] = [:]
     private var ignoredCodexAuxiliaryHookSessionIds: Set<String> = []
-    private var resolvedQuestionInterventionKeysBySession: [String: Set<String>] = [:]
+    private var resolvedQuestionInterventionReplaysBySession: [String: [String: ResolvedQuestionInterventionReplay]] = [:]
 
     /// Sync debounce interval (100ms)
     private let syncDebounceNs: UInt64 = 100_000_000
@@ -91,6 +91,14 @@ actor SessionStore {
     private var pendingHookResponseCancellationHandler: @Sendable (String, SessionIngress) -> Void = {
         SessionStore.cancelPendingHookResponse(toolUseId: $0, ingress: $1)
     }
+    private var resolvedQuestionReplayResponseHandler:
+        @Sendable (SessionIngress, String, [String: AnyCodable]?) -> Void = {
+            SessionStore.respondToResolvedQuestionReplay(
+                ingress: $0,
+                toolUseId: $1,
+                updatedInput: $2
+            )
+        }
 
     /// Periodic sweep that removes sessions whose Claude process has died
     /// without delivering `SessionEnd` (Ctrl-C kill, OOM, terminal closed) and
@@ -225,6 +233,18 @@ actor SessionStore {
     ) {
         pendingHookResponseCancellationHandler = handler ?? {
             SessionStore.cancelPendingHookResponse(toolUseId: $0, ingress: $1)
+        }
+    }
+
+    func setResolvedQuestionReplayResponseHandlerForTesting(
+        _ handler: (@Sendable (SessionIngress, String, [String: AnyCodable]?) -> Void)?
+    ) {
+        resolvedQuestionReplayResponseHandler = handler ?? {
+            SessionStore.respondToResolvedQuestionReplay(
+                ingress: $0,
+                toolUseId: $1,
+                updatedInput: $2
+            )
         }
     }
 
@@ -552,9 +572,19 @@ actor SessionStore {
             session: session
         )
         let hookIntervention = event.intervention
-        if shouldSkipResolvedQuestionIntervention(hookIntervention, for: event, in: session) {
+        if let resolvedQuestionReplay = resolvedQuestionInterventionReplay(
+            for: hookIntervention,
+            event: event,
+            in: session
+        ) {
             Self.logger.notice(
                 "Ignoring already resolved Claude question session=\(sessionId, privacy: .public) tool=\((event.toolUseId ?? "").prefix(12), privacy: .public)"
+            )
+            respondToResolvedQuestionReplay(
+                resolvedQuestionReplay,
+                intervention: hookIntervention,
+                event: event,
+                session: session
             )
             sessions[sessionId] = session
             syncLinkedQoderChildSessions(for: session)
@@ -1182,6 +1212,11 @@ actor SessionStore {
         let ingress: SessionIngress
     }
 
+    private struct ResolvedQuestionInterventionReplay {
+        let toolUseId: String
+        let submittedAnswers: [String: [String]]
+    }
+
     private nonisolated static func cancelPendingHookResponse(
         toolUseId: String,
         ingress: SessionIngress
@@ -1198,6 +1233,30 @@ actor SessionStore {
             case .codexAppServer, .nativeRuntime, .desktopAppMonitor:
                 break
             }
+        }
+    }
+
+    private nonisolated static func respondToResolvedQuestionReplay(
+        ingress: SessionIngress,
+        toolUseId: String,
+        updatedInput: [String: AnyCodable]?
+    ) {
+        let rawUpdatedInput = updatedInput?.mapValues { $0.value }
+        switch ingress {
+        case .remoteBridge:
+            RemoteConnectorManager.shared.respondToIntervention(
+                toolUseId: toolUseId,
+                decision: "answer",
+                updatedInput: rawUpdatedInput
+            )
+        case .hookBridge:
+            HookSocketServer.shared.respondToIntervention(
+                toolUseId: toolUseId,
+                decision: "answer",
+                updatedInput: rawUpdatedInput
+            )
+        case .codexAppServer, .nativeRuntime, .desktopAppMonitor:
+            break
         }
     }
 
@@ -1275,31 +1334,60 @@ actor SessionStore {
 
     private func recordResolvedQuestionIntervention(
         _ intervention: SessionIntervention,
+        submittedAnswers: [String: [String]],
         in session: SessionState
     ) {
         guard shouldTrackResolvedQuestionIntervention(intervention, in: session),
-              let key = resolvedQuestionInterventionKey(for: intervention) else {
+              let key = resolvedQuestionInterventionKey(for: intervention),
+              let toolUseId = resolvedQuestionInterventionToolUseId(for: intervention) else {
             return
         }
 
-        resolvedQuestionInterventionKeysBySession[session.sessionId, default: []].insert(key)
+        resolvedQuestionInterventionReplaysBySession[session.sessionId, default: [:]][key] =
+            ResolvedQuestionInterventionReplay(
+                toolUseId: toolUseId,
+                submittedAnswers: submittedAnswers
+            )
     }
 
-    private func shouldSkipResolvedQuestionIntervention(
+    private func resolvedQuestionInterventionReplay(
         _ intervention: SessionIntervention?,
-        for event: HookEvent,
+        event: HookEvent,
         in session: SessionState
-    ) -> Bool {
+    ) -> ResolvedQuestionInterventionReplay? {
         guard let intervention,
               event.provider == .claude,
               event.event == "PermissionRequest",
               shouldTrackResolvedQuestionIntervention(intervention, in: session),
               event.clientInfo.isPlainClaudeCodeRouting,
               let key = resolvedQuestionInterventionKey(for: intervention) else {
-            return false
+            return nil
         }
 
-        return resolvedQuestionInterventionKeysBySession[session.sessionId]?.contains(key) == true
+        return resolvedQuestionInterventionReplaysBySession[session.sessionId]?[key]
+    }
+
+    private func respondToResolvedQuestionReplay(
+        _ replay: ResolvedQuestionInterventionReplay,
+        intervention: SessionIntervention?,
+        event: HookEvent,
+        session: SessionState
+    ) {
+        let updatedInput: [String: Any]?
+        if let intervention,
+           let rawJSON = intervention.metadata["toolInputJSON"] ?? intervention.metadata["tool_input_json"] {
+            updatedInput = SessionMonitor.updatedHookToolInput(
+                rawJSON: rawJSON,
+                answers: replay.submittedAnswers,
+                clientInfo: session.clientInfo
+            )
+        } else {
+            updatedInput = nil
+        }
+
+        let toolUseId = event.toolUseId ?? replay.toolUseId
+        let encodedUpdatedInput = updatedInput?.mapValues { AnyCodable($0) }
+        resolvedQuestionReplayResponseHandler(session.ingress, toolUseId, encodedUpdatedInput)
     }
 
     private nonisolated func shouldTrackResolvedQuestionIntervention(
@@ -1315,17 +1403,7 @@ actor SessionStore {
     private nonisolated func resolvedQuestionInterventionKey(for intervention: SessionIntervention) -> String? {
         guard intervention.kind == .question else { return nil }
 
-        let toolUseId = [
-            intervention.metadata["originalToolUseId"],
-            intervention.metadata["toolUseId"],
-            intervention.metadata["tool_use_id"]
-        ]
-        .compactMap { value -> String? in
-            guard let value else { return nil }
-            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-            return trimmed.isEmpty ? nil : trimmed
-        }
-        .first
+        let toolUseId = resolvedQuestionInterventionMetadataToolUseId(for: intervention)
         if let toolUseId {
             return "tool:\(toolUseId)"
         }
@@ -1338,6 +1416,35 @@ actor SessionStore {
 
         let toolName = normalizedQuestionToolName(for: intervention) ?? "question"
         return "question:\(toolName):\(questionSignature)"
+    }
+
+    private nonisolated func resolvedQuestionInterventionMetadataToolUseId(for intervention: SessionIntervention) -> String? {
+        [
+            intervention.metadata["originalToolUseId"],
+            intervention.metadata["toolUseId"],
+            intervention.metadata["tool_use_id"]
+        ]
+        .compactMap { value -> String? in
+            guard let value else { return nil }
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
+        }
+        .first
+    }
+
+    private nonisolated func resolvedQuestionInterventionToolUseId(for intervention: SessionIntervention) -> String? {
+        [
+            intervention.metadata["originalToolUseId"],
+            intervention.metadata["toolUseId"],
+            intervention.metadata["tool_use_id"],
+            intervention.id
+        ]
+        .compactMap { value -> String? in
+            guard let value else { return nil }
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
+        }
+        .first
     }
 
     private nonisolated func normalizedQuestionToolName(for intervention: SessionIntervention) -> String? {
@@ -1888,8 +1995,13 @@ actor SessionStore {
         submittedAnswers: [String: [String]]?
     ) async {
         guard var session = sessions[sessionId] else { return }
-        if let intervention = session.intervention {
-            recordResolvedQuestionIntervention(intervention, in: session)
+        if let intervention = session.intervention,
+           let submittedAnswers {
+            recordResolvedQuestionIntervention(
+                intervention,
+                submittedAnswers: submittedAnswers,
+                in: session
+            )
         }
         if let intervention = session.intervention,
            shouldAwaitExternalContinuationAfterResolving(intervention, in: session) {
@@ -2618,10 +2730,10 @@ actor SessionStore {
             .filter { $0.linkedParentSessionId == resolvedSessionId }
             .map(\.sessionId)
         sessions.removeValue(forKey: resolvedSessionId)
-        resolvedQuestionInterventionKeysBySession.removeValue(forKey: resolvedSessionId)
+        resolvedQuestionInterventionReplaysBySession.removeValue(forKey: resolvedSessionId)
         for childSessionId in linkedChildSessionIDs {
             sessions.removeValue(forKey: childSessionId)
-            resolvedQuestionInterventionKeysBySession.removeValue(forKey: childSessionId)
+            resolvedQuestionInterventionReplaysBySession.removeValue(forKey: childSessionId)
         }
         clearCodexSessionAliases(for: resolvedSessionId)
         cancelPendingSync(sessionId: resolvedSessionId)
