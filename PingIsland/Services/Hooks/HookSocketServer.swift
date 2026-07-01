@@ -134,7 +134,7 @@ struct HookEvent: Sendable {
             return .compacting
         }
 
-        if isQoderWorkNonResponsiveToolEvent,
+        if shouldSuppressApprovalHandling,
            status == "waiting_for_approval" {
             return .processing
         }
@@ -159,6 +159,10 @@ struct HookEvent: Sendable {
     }
 
     nonisolated var expectsResponse: Bool {
+        if bridgeExpectsResponse == false {
+            return false
+        }
+
         if isQoderWorkNonResponsiveToolEvent {
             return false
         }
@@ -223,6 +227,10 @@ struct HookEvent: Sendable {
 
     nonisolated var shouldFilterBeforeApprovalHandling: Bool {
         isQoderWorkNonResponsiveToolEvent
+    }
+
+    nonisolated var shouldSuppressApprovalHandling: Bool {
+        bridgeExpectsResponse == false
     }
 
     private nonisolated var isCodeBuddyCLIAskUserQuestionNotification: Bool {
