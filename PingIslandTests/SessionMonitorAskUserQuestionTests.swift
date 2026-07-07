@@ -101,7 +101,7 @@ final class SessionMonitorAskUserQuestionTests: XCTestCase {
         XCTAssertEqual(answers?["q_0"] as? String, "SessionStore")
     }
 
-    func testUpdatedHookToolInputUsesClaudeAnswerShapeForQoderCLI() {
+    func testUpdatedHookToolInputIncludesQoderCLIQuestionAliases() {
         let rawJSON = """
         {
           "questions": [
@@ -132,7 +132,8 @@ final class SessionMonitorAskUserQuestionTests: XCTestCase {
 
         let answers = updated?["answers"] as? [String: Any]
         XCTAssertEqual(answers?["Would you like me to help you with a specific coding task?"] as? String, "Yes")
-        XCTAssertNil(answers?["task_intent"])
+        XCTAssertEqual(answers?["Task"] as? String, "Yes")
+        XCTAssertEqual(answers?["task_intent"] as? String, "Yes")
         XCTAssertNil(answers?["0"])
     }
 

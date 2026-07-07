@@ -987,6 +987,7 @@ class SessionMonitor: ObservableObject {
     private enum HookAnswerEncodingStrategy {
         case lookupAliases
         case codeBuddyCLI
+        case qoderCLI
         case questionText
         case questionIndex
     }
@@ -997,7 +998,7 @@ class SessionMonitor: ObservableObject {
         let bundleIdentifier = normalizedClientInfo?.bundleIdentifier?.lowercased()
 
         if profileID == "qoder-cli" {
-            return .questionText
+            return .qoderCLI
         }
 
         if profileID == "codebuddy-cli" {
@@ -1059,6 +1060,21 @@ class SessionMonitor: ObservableObject {
             case .codeBuddyCLI:
                 for key in lookupKeys + ["q_\(index)"] {
                     encodedAnswers[key] = encodedValue
+                }
+            case .qoderCLI:
+                let outputKeys = [
+                    question["question"] as? String,
+                    question["header"] as? String,
+                    question["id"] as? String
+                ].compactMap { value -> String? in
+                    guard let value, !value.isEmpty else { return nil }
+                    return value
+                }
+                for key in outputKeys {
+                    encodedAnswers[key] = encodedValue
+                }
+                if outputKeys.isEmpty {
+                    encodedAnswers["\(index)"] = encodedValue
                 }
             case .questionIndex:
                 encodedAnswers["\(index)"] = encodedValue
