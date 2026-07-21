@@ -450,10 +450,8 @@ struct NotchView: View {
                 }
             }
             .onChange(of: viewModel.isQuietBackgroundPresentationActive) { _, isActive in
-                if isActive && viewModel.status != .opened {
-                    isVisible = false
-                } else {
-                    handleProcessingChange()
+                handleProcessingChange()
+                if !isActive {
                     scheduleDetachmentHintPresentationIfNeeded(delay: Self.detachmentHintRetryDelay)
                 }
             }

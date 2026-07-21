@@ -456,7 +456,7 @@ final class NotchViewModelTests: XCTestCase {
         }
     }
 
-    func testQuietBackgroundHidesClosedDockedPresentationButPreservesOpenedPanel() async {
+    func testQuietBackgroundKeepsClosedDockedPresentationVisible() async {
         let viewModel = await MainActor.run {
             NotchViewModel(
                 deviceNotchRect: .zero,
@@ -472,13 +472,13 @@ final class NotchViewModelTests: XCTestCase {
             viewModel.updateQuietBackgroundPresentationState(isActive: true)
 
             XCTAssertTrue(viewModel.isQuietBackgroundPresentationActive)
-            XCTAssertTrue(viewModel.shouldHideWindowPresentation)
+            XCTAssertFalse(viewModel.shouldHideWindowPresentation)
 
             viewModel.notchOpen(reason: .click)
             XCTAssertFalse(viewModel.shouldHideWindowPresentation)
 
             viewModel.notchClose()
-            XCTAssertTrue(viewModel.shouldHideWindowPresentation)
+            XCTAssertFalse(viewModel.shouldHideWindowPresentation)
 
             viewModel.updateQuietBackgroundPresentationState(isActive: false)
             XCTAssertFalse(viewModel.shouldHideWindowPresentation)

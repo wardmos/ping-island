@@ -501,6 +501,33 @@ func mapsQoderIDEContextAheadOfGenericVSCodeDetection() throws {
 }
 
 @Test
+func mapsQoderCNIDEContextAheadOfGenericVSCodeDetection() throws {
+    let payload = #"{"hook_event_name":"UserPromptSubmit","session_id":"qoder-cn-ide-1"}"#.data(using: .utf8)!
+
+    let envelope = HookPayloadMapper.makeEnvelope(
+        source: .claude,
+        arguments: [
+            "island-bridge", "--source", "claude",
+            "--client-kind", "qoder-cn",
+            "--client-name", "Qoder CN",
+            "--client-originator", "Qoder CN"
+        ],
+        environment: [
+            "TERM_PROGRAM": "vscode",
+            "__CFBundleIdentifier": "com.aliyun.lingma.ide",
+            "VSCODE_GIT_IPC_HANDLE": "/Applications/Qoder CN.app/Contents/Resources/app/out/vs/workbench",
+            "PWD": "/tmp/demo"
+        ],
+        stdinData: payload
+    )
+
+    #expect(envelope.terminalContext.terminalBundleID == "com.aliyun.lingma.ide")
+    #expect(envelope.terminalContext.ideName == "Qoder CN")
+    #expect(envelope.terminalContext.ideBundleID == "com.aliyun.lingma.ide")
+    #expect(envelope.metadata["client_kind"] == "qoder-cn")
+}
+
+@Test
 func explicitBridgeOriginatorOverridesGenericVSCodeInference() throws {
     let payload = """
     {
@@ -875,6 +902,43 @@ func qoderCLIClientMetadataCanBeInjectedFromBridgeArguments() throws {
     #expect(envelope.metadata["client_origin"] == "cli")
     #expect(envelope.metadata["client_originator"] == "Qoder")
     #expect(envelope.sessionKey == "claude:qoder-cli-123")
+}
+
+@Test
+func qoderCNCLIClientMetadataAndAnswerPayloadUseResponsiveCLIShape() throws {
+    let input = #"{"hook_event_name":"UserPromptSubmit","session_id":"qoder-cn-cli-123"}"#.data(using: .utf8)!
+    let envelope = HookPayloadMapper.makeEnvelope(
+        source: .claude,
+        arguments: [
+            "island-bridge", "--source", "claude",
+            "--client-kind", "qoder-cn-cli",
+            "--client-name", "Qoder CN CLI",
+            "--client-origin", "cli",
+            "--client-originator", "Qoder CN"
+        ],
+        environment: ["PWD": "/tmp/demo"],
+        stdinData: input
+    )
+
+    #expect(envelope.metadata["client_kind"] == "qoder-cn-cli")
+    #expect(envelope.metadata["client_name"] == "Qoder CN CLI")
+    #expect(envelope.metadata["client_origin"] == "cli")
+
+    let response = BridgeResponse(
+        requestID: UUID(),
+        decision: .answer([:]),
+        updatedInput: ["answers": .object(["Pick one": .string("First")])]
+    )
+    let payload = HookPayloadMapper.stdoutPayload(
+        for: .claude,
+        response: response,
+        eventType: "PreToolUse",
+        metadata: ["client_kind": "qoder-cn-cli", "client_name": "Qoder CN CLI", "tool_name": "AskUserQuestion"]
+    )
+    let json = try #require(JSONSerialization.jsonObject(with: Data(payload.utf8)) as? [String: Any])
+    let hookSpecificOutput = try #require(json["hookSpecificOutput"] as? [String: Any])
+    #expect(hookSpecificOutput["permissionDecision"] as? String == "allow")
+    #expect(hookSpecificOutput["updatedInput"] as? [String: Any] != nil)
 }
 
 @Test
@@ -1274,6 +1338,56 @@ func qoderCLIHooksExecutedInsideQoderIDEStayNotifyOnly() throws {
     #expect(envelope.metadata["terminal_bundle_id"] == "com.qoder.ide")
     #expect(envelope.expectsResponse == false)
     #expect(envelope.status?.kind == .waitingForInput)
+    #expect(envelope.intervention == nil)
+    #expect(HookPayloadMapper.shouldDeliverEnvelope(envelope))
+}
+
+@Test
+func qoderCLIAnsweredPermissionRequestKeepsBridgeResponseOpenForReplay() throws {
+    let payload = """
+    {
+      "hook_event_name": "PermissionRequest",
+      "session_id": "qoder-cli-answered",
+      "tool_name": "AskUserQuestion",
+      "tool_input": {
+        "questions": [
+          {
+            "header": "Task type",
+            "question": "What would you like to work on today?",
+            "options": [
+              {"label": "Write new code"},
+              {"label": "Debug or fix a bug"}
+            ]
+          }
+        ],
+        "answers": {
+          "What would you like to work on today?": "Write new code"
+        }
+      }
+    }
+    """.data(using: .utf8)!
+
+    let envelope = HookPayloadMapper.makeEnvelope(
+        source: .claude,
+        arguments: [
+            "island-bridge",
+            "--source", "claude",
+            "--client-kind", "qoder-cli",
+            "--client-name", "Qoder CLI",
+            "--client-origin", "cli",
+            "--client-originator", "Qoder"
+        ],
+        environment: [
+            "TERM_PROGRAM": "vscode",
+            "__CFBundleIdentifier": "com.qoder.ide",
+            "PWD": "/tmp/demo"
+        ],
+        stdinData: payload
+    )
+
+    #expect(envelope.eventType == "PermissionRequest")
+    #expect(envelope.status?.kind == .active)
+    #expect(envelope.expectsResponse == true)
     #expect(envelope.intervention == nil)
     #expect(HookPayloadMapper.shouldDeliverEnvelope(envelope))
 }

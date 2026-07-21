@@ -1563,6 +1563,8 @@ final class RemoteConnectorManager: ObservableObject {
             "codebuddy-cli-hooks",
             "qoder-hooks",
             "qoder-cli-hooks",
+            "qoder-cn-hooks",
+            "qoder-cn-cli-hooks",
             "qoderwork-hooks"
         ]
         return ClientProfileRegistry.managedHookProfiles.filter { profile in

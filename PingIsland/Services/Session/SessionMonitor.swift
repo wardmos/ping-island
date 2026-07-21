@@ -987,6 +987,7 @@ class SessionMonitor: ObservableObject {
     private enum HookAnswerEncodingStrategy {
         case lookupAliases
         case codeBuddyCLI
+        case qoderCLI
         case questionText
         case questionIndex
     }
@@ -996,8 +997,8 @@ class SessionMonitor: ObservableObject {
         let profileID = normalizedClientInfo?.profileID?.lowercased()
         let bundleIdentifier = normalizedClientInfo?.bundleIdentifier?.lowercased()
 
-        if profileID == "qoder-cli" {
-            return .questionText
+        if profileID == "qoder-cli" || profileID == "qoder-cn-cli" {
+            return .qoderCLI
         }
 
         if profileID == "codebuddy-cli" {
@@ -1005,10 +1006,12 @@ class SessionMonitor: ObservableObject {
         }
 
         if profileID == "qoder"
+            || profileID == "qoder-cn"
             || profileID == "qoderwork"
             || profileID == "codebuddy"
             || profileID == "workbuddy"
             || bundleIdentifier == "com.qoder.ide"
+            || bundleIdentifier == "com.aliyun.lingma.ide"
             || bundleIdentifier == "com.qoder.work"
             || bundleIdentifier == "com.tencent.codebuddy"
             || bundleIdentifier == "com.codebuddy.app"
@@ -1059,6 +1062,21 @@ class SessionMonitor: ObservableObject {
             case .codeBuddyCLI:
                 for key in lookupKeys + ["q_\(index)"] {
                     encodedAnswers[key] = encodedValue
+                }
+            case .qoderCLI:
+                let outputKeys = [
+                    question["question"] as? String,
+                    question["header"] as? String,
+                    question["id"] as? String
+                ].compactMap { value -> String? in
+                    guard let value, !value.isEmpty else { return nil }
+                    return value
+                }
+                for key in outputKeys {
+                    encodedAnswers[key] = encodedValue
+                }
+                if outputKeys.isEmpty {
+                    encodedAnswers["\(index)"] = encodedValue
                 }
             case .questionIndex:
                 encodedAnswers["\(index)"] = encodedValue
@@ -1126,11 +1144,13 @@ class SessionMonitor: ObservableObject {
         let normalizedClientInfo = event.clientInfo.normalizedForClaudeRouting()
         let isManagedQuestion =
             normalizedClientInfo.profileID == "qoder"
+            || normalizedClientInfo.profileID == "qoder-cn"
             || normalizedClientInfo.profileID == "qoderwork"
             || normalizedClientInfo.profileID == "codebuddy"
             || normalizedClientInfo.profileID == "codebuddy-cli"
             || normalizedClientInfo.profileID == "workbuddy"
             || normalizedClientInfo.bundleIdentifier == "com.qoder.ide"
+            || normalizedClientInfo.bundleIdentifier == "com.aliyun.lingma.ide"
             || normalizedClientInfo.bundleIdentifier == "com.qoder.work"
             || normalizedClientInfo.bundleIdentifier == "com.tencent.codebuddy"
             || normalizedClientInfo.bundleIdentifier == "com.codebuddy.app"

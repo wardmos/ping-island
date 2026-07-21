@@ -15,7 +15,8 @@ struct SessionQuestionForm: View {
     @State private var answers: [String: [String]] = [:]
     @State private var otherAnswers: [String: String] = [:]
     @State private var measuredQuestionContentHeight: CGFloat = 0
-    @FocusState private var focusedQuestionID: String?
+    @State private var focusedIslandTextQuestionID: String?
+    @FocusState private var focusedSecureQuestionID: String?
 
     private var displayQuestions: [SessionInterventionQuestion] {
         intervention.resolvedQuestions
@@ -166,6 +167,10 @@ struct SessionQuestionForm: View {
         Color.black.opacity(0.2)
     }
 
+    private var activeFocusedQuestionID: String? {
+        focusedIslandTextQuestionID ?? focusedSecureQuestionID
+    }
+
     init(
         intervention: SessionIntervention,
         submitLabel: String? = nil,
@@ -241,7 +246,8 @@ struct SessionQuestionForm: View {
             notifyInteractionState()
             persistDraft()
         }
-        .onChange(of: focusedQuestionID) { _, _ in notifyInteractionState() }
+        .onChange(of: focusedIslandTextQuestionID) { _, _ in notifyInteractionState() }
+        .onChange(of: focusedSecureQuestionID) { _, _ in notifyInteractionState() }
         .onDisappear {
             onInteractionStateChanged(false)
         }
@@ -396,7 +402,7 @@ struct SessionQuestionForm: View {
             .textFieldStyle(.plain)
             .foregroundColor(.white)
             .tint(TerminalColors.blue)
-            .focused($focusedQuestionID, equals: question.id)
+            .focused($focusedSecureQuestionID, equals: question.id)
             .submitLabel(.send)
             .onSubmit {
                 submitCurrentAnswers()
@@ -414,7 +420,7 @@ struct SessionQuestionForm: View {
                     get: { answers[question.id]?.first ?? "" },
                     set: { answers[question.id] = normalizedAnswers(from: $0) }
                 ),
-                isFocused: focusedQuestionID == question.id,
+                isFocused: focusedIslandTextQuestionID == question.id,
                 isEditable: isEditable,
                 onFocusChanged: { setFocused($0, for: question) },
                 onSubmit: { submitCurrentAnswers() }
@@ -429,7 +435,7 @@ struct SessionQuestionForm: View {
     }
 
     private func customAnswerField(for question: SessionInterventionQuestion) -> some View {
-        let isFocused = focusedQuestionID == question.id
+        let isFocused = focusedIslandTextQuestionID == question.id
 
         return HStack(spacing: 8) {
             Image(systemName: "text.cursor")
@@ -479,7 +485,7 @@ struct SessionQuestionForm: View {
             questions: displayQuestions,
             answers: answers,
             otherAnswers: otherAnswers,
-            focusedQuestionID: focusedQuestionID
+            focusedQuestionID: activeFocusedQuestionID
         )
     }
 
@@ -512,16 +518,17 @@ struct SessionQuestionForm: View {
     private func setCustomAnswer(_ value: String, for question: SessionInterventionQuestion) {
         otherAnswers[question.id] = value
         if !question.allowsMultiple,
-           !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            answers[question.id] = []
+           !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+           !(answers[question.id]?.isEmpty ?? true) {
+            answers[question.id] = nil
         }
     }
 
     private func setFocused(_ isFocused: Bool, for question: SessionInterventionQuestion) {
         if isFocused {
-            focusedQuestionID = question.id
-        } else if focusedQuestionID == question.id {
-            focusedQuestionID = nil
+            focusedIslandTextQuestionID = question.id
+        } else if focusedIslandTextQuestionID == question.id {
+            focusedIslandTextQuestionID = nil
         }
     }
 
