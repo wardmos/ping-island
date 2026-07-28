@@ -85,4 +85,136 @@ final class CodexAppServerMonitorTests: XCTestCase {
         XCTAssertEqual(questions.first?.options.map(\.title), ["Tests", "UI"])
         XCTAssertTrue(questions.first?.allowsOther ?? false)
     }
+
+    func testRecentIdleThreadRequestsRolloutRecoveryAfterReconnect() {
+        let referenceDate = Date(timeIntervalSince1970: 1_784_481_907)
+        let recentUpdate = referenceDate.addingTimeInterval(-93).timeIntervalSince1970
+        let rolloutPath = "/tmp/ping-island-tests/rollout-thread-with-recent-activity.jsonl"
+        let thread: [String: Any] = [
+            "id": "thread-with-recent-activity",
+            "updatedAt": recentUpdate,
+            "status": ["type": "idle"],
+            "path": rolloutPath
+        ]
+
+        XCTAssertTrue(CodexAppServerMonitor.shouldRecoverRolloutSnapshot(
+            from: thread,
+            referenceDate: referenceDate
+        ))
+        XCTAssertEqual(CodexAppServerMonitor.rolloutPath(from: thread), rolloutPath)
+    }
+
+    func testActiveThreadRequestsRolloutRecoveryDespiteStaleTimestamp() {
+        let referenceDate = Date(timeIntervalSince1970: 1_784_481_907)
+
+        XCTAssertTrue(CodexAppServerMonitor.shouldRecoverRolloutSnapshot(
+            from: [
+                "id": "active-thread",
+                "updatedAt": referenceDate.addingTimeInterval(-(60 * 60)).timeIntervalSince1970,
+                "status": ["type": "active"]
+            ],
+            referenceDate: referenceDate
+        ))
+    }
+
+    func testStaleIdleThreadDoesNotRequestRolloutRecovery() {
+        let referenceDate = Date(timeIntervalSince1970: 1_784_481_907)
+        let staleUpdate = referenceDate.addingTimeInterval(-(31 * 60)).timeIntervalSince1970
+
+        XCTAssertFalse(CodexAppServerMonitor.shouldRecoverRolloutSnapshot(
+            from: [
+                "id": "stale-thread",
+                "updatedAt": staleUpdate,
+                "status": ["type": "idle"]
+            ],
+            referenceDate: referenceDate
+        ))
+    }
+
+    func testRecentNotLoadedThreadRequestsRolloutRecovery() {
+        let referenceDate = Date(timeIntervalSince1970: 1_784_812_800)
+        let thread: [String: Any] = [
+            "id": "vscode-thread",
+            "updatedAt": referenceDate.addingTimeInterval(-15).timeIntervalSince1970,
+            "recencyAt": referenceDate.addingTimeInterval(-30).timeIntervalSince1970,
+            "status": ["type": "notLoaded"]
+        ]
+
+        XCTAssertNotNil(CodexAppServerMonitor.notLoadedRecoveryVersion(
+            from: thread,
+            referenceDate: referenceDate
+        ))
+    }
+
+    func testNotLoadedThreadRecoveryUsesRecencyTimestampWhenUpdatedTimestampIsMissing() {
+        let referenceDate = Date(timeIntervalSince1970: 1_784_812_800)
+        let thread: [String: Any] = [
+            "id": "vscode-thread",
+            "recencyAt": referenceDate.addingTimeInterval(-15).timeIntervalSince1970,
+            "status": ["type": "notLoaded"]
+        ]
+
+        XCTAssertNotNil(CodexAppServerMonitor.notLoadedRecoveryVersion(
+            from: thread,
+            referenceDate: referenceDate
+        ))
+    }
+
+    func testLoadedAndStaleThreadsDoNotRequestRolloutRecovery() {
+        let referenceDate = Date(timeIntervalSince1970: 1_784_812_800)
+        let recentTimestamp = referenceDate.addingTimeInterval(-15).timeIntervalSince1970
+        let staleTimestamp = referenceDate.addingTimeInterval(-(11 * 60)).timeIntervalSince1970
+
+        XCTAssertNil(CodexAppServerMonitor.notLoadedRecoveryVersion(
+            from: [
+                "id": "loaded-thread",
+                "updatedAt": recentTimestamp,
+                "status": ["type": "active"]
+            ],
+            referenceDate: referenceDate
+        ))
+        XCTAssertNil(CodexAppServerMonitor.notLoadedRecoveryVersion(
+            from: [
+                "id": "stale-thread",
+                "updatedAt": staleTimestamp,
+                "status": ["type": "notLoaded"]
+            ],
+            referenceDate: referenceDate
+        ))
+    }
+
+    func testNotLoadedRecoveryVersionChangesWhenActivityAdvances() throws {
+        let referenceDate = Date(timeIntervalSince1970: 1_784_812_800)
+        var thread: [String: Any] = [
+            "id": "vscode-thread",
+            "updatedAt": referenceDate.addingTimeInterval(-30).timeIntervalSince1970,
+            "status": ["type": "notLoaded"]
+        ]
+        let initialVersion = try XCTUnwrap(CodexAppServerMonitor.notLoadedRecoveryVersion(
+            from: thread,
+            referenceDate: referenceDate
+        ))
+
+        thread["updatedAt"] = referenceDate.addingTimeInterval(-5).timeIntervalSince1970
+
+        XCTAssertNotEqual(
+            initialVersion,
+            CodexAppServerMonitor.notLoadedRecoveryVersion(
+                from: thread,
+                referenceDate: referenceDate
+            )
+        )
+    }
+
+    func testRolloutPathAcceptsJSONLPathWithoutTreatingWorkspaceAsSessionFile() {
+        XCTAssertEqual(
+            CodexAppServerMonitor.rolloutPath(from: [
+                "path": "/tmp/codex/rollout-vscode-thread.jsonl"
+            ]),
+            "/tmp/codex/rollout-vscode-thread.jsonl"
+        )
+        XCTAssertNil(CodexAppServerMonitor.rolloutPath(from: [
+            "path": "/tmp/codex-workspace"
+        ]))
+    }
 }

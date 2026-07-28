@@ -3318,7 +3318,11 @@ actor SessionStore {
             }
         }
         for session in sortedSessions {
-            if updatePersistedAssociationIfNeeded(from: session) {
+            if session.isLikelyEmptyClaudeHookSessionForUI {
+                if removePersistedAssociation(provider: session.provider, sessionId: session.sessionId) {
+                    shouldPersistAssociations = true
+                }
+            } else if updatePersistedAssociationIfNeeded(from: session) {
                 shouldPersistAssociations = true
             }
         }
@@ -3969,6 +3973,7 @@ actor SessionStore {
             ".cursor",
             ".gemini",
             ".kimi",
+            ".kimi-code",
             ".openclaw",
             ".qoder",
             ".qwen",

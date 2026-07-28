@@ -50,9 +50,15 @@ actor CodexAppServerMonitor {
     private var pendingResponses: [String: CheckedContinuation<[String: Any], Error>] = [:]
     private var pendingRequestsByThread: [String: PendingRequest] = [:]
     private var threadApprovalModes: [String: String] = [:]  // threadId → approvalMode
+    private var rolloutRecoveryVersions: [String: String] = [:]
+    private var recoveredNotLoadedThreadVersions: [String: String] = [:]
     private var resolvedClientBundleIdentifier: String?
     private var resolvedClientName: String?
     private var lastThreadDiagnostics: [ThreadDiagnosticsSnapshot] = []
+
+    private nonisolated static let rolloutRecoveryWindow: TimeInterval = 30 * 60
+    private nonisolated static let notLoadedRecoveryWindow: TimeInterval = 10 * 60
+    private nonisolated static let maximumFutureActivitySkew: TimeInterval = 60
 
     private init() {}
 
@@ -110,6 +116,8 @@ actor CodexAppServerMonitor {
         process = nil
         pendingRequestsByThread.removeAll()
         threadApprovalModes.removeAll()
+        rolloutRecoveryVersions.removeAll()
+        recoveredNotLoadedThreadVersions.removeAll()
         lastThreadDiagnostics.removeAll()
 
         for (_, continuation) in pendingResponses {
@@ -611,6 +619,8 @@ actor CodexAppServerMonitor {
         case "thread/archived":
             guard let threadId = params["threadId"] as? String else { return }
             logger.info("Codex thread archived thread=\(threadId, privacy: .public)")
+            rolloutRecoveryVersions.removeValue(forKey: threadId)
+            recoveredNotLoadedThreadVersions.removeValue(forKey: threadId)
             removeThreadDiagnostics(threadId: threadId)
             await SessionStore.shared.process(.sessionEnded(sessionId: threadId))
 
@@ -907,6 +917,75 @@ actor CodexAppServerMonitor {
         for thread in visibleThreads {
             await ingestThread(thread)
         }
+        await recoverRecentNotLoadedThreads(visibleThreads)
+    }
+
+    private func recoverRecentNotLoadedThreads(_ threads: [[String: Any]]) async {
+        let referenceDate = Date()
+
+        for thread in threads {
+            guard let threadId = thread["id"] as? String,
+                  let version = Self.notLoadedRecoveryVersion(
+                    from: thread,
+                    referenceDate: referenceDate
+                  ),
+                  recoveredNotLoadedThreadVersions[threadId] != version else {
+                continue
+            }
+
+            recoveredNotLoadedThreadVersions[threadId] = version
+            let clientInfo = makeClientInfo(from: thread, threadId: threadId)
+            // thread/read intentionally preserves notLoaded for stored threads.
+            // The rollout is the cross-process source of truth when VS Code owns
+            // the live app-server instance.
+            let snapshot = await CodexRolloutParser.shared.parseThread(
+                threadId: threadId,
+                fallbackCwd: thread["cwd"] as? String ?? "/",
+                clientInfo: clientInfo
+            )
+
+            guard recoveredNotLoadedThreadVersions[threadId] == version else {
+                continue
+            }
+            guard let snapshot else {
+                recoveredNotLoadedThreadVersions.removeValue(forKey: threadId)
+                logger.debug(
+                    "Codex notLoaded rollout recovery unavailable thread=\(threadId, privacy: .public)"
+                )
+                continue
+            }
+
+            await SessionStore.shared.syncCodexThreadSnapshot(snapshot)
+            logger.debug(
+                "Codex notLoaded rollout recovered thread=\(threadId, privacy: .public) phase=\(String(describing: snapshot.phase), privacy: .public)"
+            )
+        }
+    }
+
+    nonisolated static func notLoadedRecoveryVersion(
+        from thread: [String: Any],
+        referenceDate: Date = Date()
+    ) -> String? {
+        guard (thread["status"] as? [String: Any])?["type"] as? String == "notLoaded" else {
+            return nil
+        }
+
+        let updatedAt = date(fromUnixTimestamp: thread["updatedAt"])
+        let recencyAt = date(fromUnixTimestamp: thread["recencyAt"])
+        guard let activityAt = [updatedAt, recencyAt].compactMap({ $0 }).max() else {
+            return nil
+        }
+
+        let activityAge = referenceDate.timeIntervalSince(activityAt)
+        guard activityAge >= -maximumFutureActivitySkew,
+              activityAge <= notLoadedRecoveryWindow else {
+            return nil
+        }
+
+        return [
+            updatedAt.map { String($0.timeIntervalSince1970) } ?? "missing",
+            recencyAt.map { String($0.timeIntervalSince1970) } ?? "missing"
+        ].joined(separator: "|")
     }
 
     private static func threadListRequestParams(limit: Int = 30) -> [String: Any] {
@@ -921,8 +1000,13 @@ actor CodexAppServerMonitor {
         guard let threadId = thread["id"] as? String else { return }
         if Self.shouldIgnoreAuxiliaryThread(thread) {
             logger.notice("Ignoring auxiliary Codex thread=\(threadId, privacy: .public)")
+            rolloutRecoveryVersions.removeValue(forKey: threadId)
+            recoveredNotLoadedThreadVersions.removeValue(forKey: threadId)
             removeThreadDiagnostics(threadId: threadId)
             return
+        }
+        if (thread["status"] as? [String: Any])?["type"] as? String != "notLoaded" {
+            recoveredNotLoadedThreadVersions.removeValue(forKey: threadId)
         }
 
         // Cache approvalMode from app-server data so approval-policy checks
@@ -964,6 +1048,50 @@ actor CodexAppServerMonitor {
             activityAt: lifecycleDates.updatedAt,
             allowSyntheticActivityTimestamp: false
         )
+
+        if Self.shouldRecoverRolloutSnapshot(from: thread),
+           let recoveryVersion = Self.rolloutRecoveryVersion(from: thread),
+           rolloutRecoveryVersions[threadId] != recoveryVersion {
+            rolloutRecoveryVersions[threadId] = recoveryVersion
+            await SessionStore.shared.requestFileSync(for: threadId)
+        }
+    }
+
+    nonisolated static func shouldRecoverRolloutSnapshot(
+        from thread: [String: Any],
+        referenceDate: Date = Date()
+    ) -> Bool {
+        let statusType = (thread["status"] as? [String: Any])?["type"] as? String
+        if statusType == "active" {
+            return true
+        }
+
+        let dates = threadLifecycleDates(from: thread)
+        if let updatedAt = dates.updatedAt,
+           referenceDate.timeIntervalSince(updatedAt) <= rolloutRecoveryWindow {
+            return true
+        }
+
+        guard let rolloutPath = rolloutPath(from: thread),
+              let attributes = try? FileManager.default.attributesOfItem(atPath: rolloutPath),
+              let modificationDate = attributes[.modificationDate] as? Date else {
+            return false
+        }
+        return referenceDate.timeIntervalSince(modificationDate) <= rolloutRecoveryWindow
+    }
+
+    private nonisolated static func rolloutRecoveryVersion(from thread: [String: Any]) -> String? {
+        let updatedAt = threadLifecycleDates(from: thread).updatedAt?.timeIntervalSince1970 ?? -1
+        let statusType = (thread["status"] as? [String: Any])?["type"] as? String ?? "unknown"
+        let rolloutPath = rolloutPath(from: thread)
+        let modificationDate = rolloutPath.flatMap { path in
+            (try? FileManager.default.attributesOfItem(atPath: path)[.modificationDate]) as? Date
+        }
+
+        guard updatedAt >= 0 || modificationDate != nil || statusType == "active" else {
+            return nil
+        }
+        return "\(updatedAt)|\(modificationDate?.timeIntervalSince1970 ?? -1)|\(statusType)"
     }
 
     private func recordThreadDiagnostics(_ snapshot: ThreadDiagnosticsSnapshot) {
@@ -1043,6 +1171,17 @@ actor CodexAppServerMonitor {
             .replacingOccurrences(of: "\r", with: "\n")
             .trimmingCharacters(in: .whitespacesAndNewlines)
         return collapsed.isEmpty ? nil : collapsed
+    }
+
+    nonisolated static func rolloutPath(from thread: [String: Any]) -> String? {
+        [
+            thread["rolloutPath"] as? String,
+            thread["sessionFilePath"] as? String,
+            thread["rollout_path"] as? String,
+            thread["path"] as? String
+        ]
+        .compactMap(sanitizedThreadText(_:))
+        .first(where: { $0.hasSuffix(".jsonl") })
     }
 
     private func parseThreadSnapshot(_ thread: [String: Any]) -> CodexThreadSnapshot? {
@@ -1415,9 +1554,7 @@ actor CodexAppServerMonitor {
         let threadSource = sanitizedText(thread["threadSource"] as? String)
             ?? sanitizedText(thread["source"] as? String)
             ?? sanitizedText(thread["sessionStartSource"] as? String)
-        let sessionFilePath = sanitizedText(thread["rolloutPath"] as? String)
-            ?? sanitizedText(thread["sessionFilePath"] as? String)
-            ?? sanitizedText(thread["rollout_path"] as? String)
+        let sessionFilePath = Self.rolloutPath(from: thread)
 
         let resolvedOrigin = origin ?? "desktop"
 

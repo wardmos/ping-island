@@ -131,6 +131,7 @@ final class RemoteHookConfigurationTests: XCTestCase {
         XCTAssertEqual(profileIDs, [
             "claude-hooks",
             "codex-hooks",
+            "antigravity-hooks",
             "hermes-hooks",
             "pi-hooks",
             "qwen-code-hooks",
@@ -152,6 +153,8 @@ final class RemoteHookConfigurationTests: XCTestCase {
 
         XCTAssertTrue(directories.contains("/root/.claude"))
         XCTAssertTrue(directories.contains("/root/.codex"))
+        XCTAssertTrue(directories.contains("/root/.gemini/antigravity-cli/plugins"))
+        XCTAssertTrue(directories.contains("/root/.gemini/antigravity-cli/plugins/ping-island"))
         XCTAssertTrue(directories.contains("/root/.hermes/plugins"))
         XCTAssertTrue(directories.contains("/root/.hermes/plugins/ping_island"))
         XCTAssertTrue(directories.contains("/root/.pi/agent/extensions"))
