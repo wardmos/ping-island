@@ -163,7 +163,7 @@ struct HookEvent: Sendable {
             return false
         }
 
-        if isQoderCLIAnsweredQuestionPermissionRequest {
+        if isQoderCLIQuestionPermissionRequest {
             return true
         }
 
@@ -272,10 +272,15 @@ struct HookEvent: Sendable {
             || normalizedMessage.contains("ask_followup_question")
     }
 
-    private nonisolated var isQoderCLIAnsweredQuestionPermissionRequest: Bool {
-        event == "PermissionRequest"
+    private nonisolated var isQoderCLIQuestionPermissionRequest: Bool {
+        let normalizedTool = tool?
+            .lowercased()
+            .replacingOccurrences(of: "_", with: "")
+            .replacingOccurrences(of: "-", with: "")
+        return event == "PermissionRequest"
             && clientInfo.isQoderCLIClient
-            && isAnsweredAskUserQuestionEvent
+            && normalizedTool == "askuserquestion"
+            && toolInput?["questions"] != nil
     }
 
     private nonisolated var isQoderIDENotifyOnlyClient: Bool {
@@ -2039,7 +2044,8 @@ class HookSocketServer {
     }
 
     private static func shouldSkipQoderIDEEvent(_ envelope: BridgeEnvelope) -> Bool {
-        let clientKind = envelope.metadata["client_kind"]?
+        let rawClientKind = envelope.metadata["client_kind"]
+        let clientKind = rawClientKind?
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
         guard clientKind == "qoder"
@@ -2047,6 +2053,16 @@ class HookSocketServer {
             || clientKind == "qoder-cn"
             || clientKind == "qoder-cn-cli" else {
             return false
+        }
+
+        if let shouldSkip = qoderCLIProfileSkipDecision(
+            clientKind: rawClientKind,
+            sourceProcessName: envelope.metadata["source_process_name"]
+        ) {
+            // Qoder desktop and CLI share one settings file. When qodercli is
+            // the actual source, accept only the explicit CLI profile and
+            // ignore the duplicate desktop-profile delivery.
+            return shouldSkip
         }
 
         let bundleIdentifiers = [
@@ -2076,6 +2092,34 @@ class HookSocketServer {
         default:
             return true
         }
+    }
+
+    static func qoderCLIProfileSkipDecision(
+        clientKind: String?,
+        sourceProcessName: String?
+    ) -> Bool? {
+        let normalizedClientKind = clientKind?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        guard normalizedClientKind == "qoder"
+            || normalizedClientKind == "qoder-cli"
+            || normalizedClientKind == "qoder-cn"
+            || normalizedClientKind == "qoder-cn-cli" else {
+            return nil
+        }
+
+        let normalizedProcessName = sourceProcessName?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        let isCLIProcess = normalizedProcessName == "qodercli"
+            || normalizedProcessName == "qoderclicn"
+            || normalizedProcessName?.hasPrefix("qodercli-") == true
+            || normalizedProcessName?.hasPrefix("qoderclicn-") == true
+        guard isCLIProcess else {
+            return nil
+        }
+
+        return normalizedClientKind == "qoder" || normalizedClientKind == "qoder-cn"
     }
 
     private static func isQoderIDEQuestionResolutionEvent(_ event: HookEvent) -> Bool {

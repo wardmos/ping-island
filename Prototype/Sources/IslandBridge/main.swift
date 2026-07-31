@@ -75,6 +75,7 @@ struct IslandBridgeMain {
                         environment: environment,
                         socketPath: socketPath,
                         outcome: "delivered",
+                        response: response,
                         policy: runtimeConfig.debugLogPolicy
                     )
                 } catch BridgeError.connectionFailed {
@@ -421,7 +422,9 @@ private enum BridgeDebugLogger {
             stdinRaw: String(data: stdinData, encoding: .utf8),
             envelopeJSON: BridgeCodec.jsonString(for: envelope),
             socketPath: nil,
-            deliveryOutcome: nil
+            deliveryOutcome: nil,
+            responseDecision: nil,
+            responseHasUpdatedInput: nil
         )
 
         let fileURL = directory.appendingPathComponent(dayStamp(for: record.timestamp) + ".jsonl")
@@ -555,6 +558,7 @@ private enum BridgeDebugLogger {
         environment: [String: String],
         socketPath: String,
         outcome: String,
+        response: BridgeResponse? = nil,
         policy: BridgeDebugLogPolicy
     ) throws {
         guard let target = debugTarget(for: envelope) else { return }
@@ -588,7 +592,9 @@ private enum BridgeDebugLogger {
             stdinRaw: nil,
             envelopeJSON: BridgeCodec.jsonString(for: envelope),
             socketPath: socketPath,
-            deliveryOutcome: outcome
+            deliveryOutcome: outcome,
+            responseDecision: response.flatMap { responseDecision($0.decision) },
+            responseHasUpdatedInput: response.map { $0.updatedInput != nil }
         )
 
         let fileURL = directory.appendingPathComponent(dayStamp(for: record.timestamp) + ".jsonl")
@@ -606,6 +612,23 @@ private enum BridgeDebugLogger {
         handle.seekToEndOfFile()
         handle.write(data)
         handle.write(Data("\n".utf8))
+    }
+
+    private static func responseDecision(_ decision: InterventionDecision?) -> String {
+        switch decision {
+        case .approve:
+            return "approve"
+        case .approveForSession:
+            return "approveForSession"
+        case .deny:
+            return "deny"
+        case .cancel:
+            return "cancel"
+        case .answer:
+            return "answer"
+        case nil:
+            return "none"
+        }
     }
 
     private static func dayStamp(for date: Date) -> String {
@@ -641,6 +664,8 @@ private struct BridgeDebugRecord: Codable, Sendable {
     let envelopeJSON: String?
     let socketPath: String?
     let deliveryOutcome: String?
+    let responseDecision: String?
+    let responseHasUpdatedInput: Bool?
 }
 
 private enum BridgeError: Error {

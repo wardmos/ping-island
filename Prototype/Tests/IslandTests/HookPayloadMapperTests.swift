@@ -1343,6 +1343,52 @@ func qoderCLIHooksExecutedInsideQoderIDEStayNotifyOnly() throws {
 }
 
 @Test
+func qoderCLIProcessKeepsLifecycleEventsWhenQoderIDEIsAlsoRunning() throws {
+    let payload = """
+    {
+      "hook_event_name": "UserPromptSubmit",
+      "session_id": "qoder-cli-iterm",
+      "prompt": "Use a tool to ask me a question",
+      "source_process_name": "qodercli"
+    }
+    """.data(using: .utf8)!
+    let environment = [
+        "TERM_PROGRAM": "iTerm.app",
+        "__CFBundleIdentifier": "com.googlecode.iterm2",
+        "VSCODE_GIT_IPC_HANDLE": "/Applications/Qoder.app/Contents/Resources/app/out/vs/workbench",
+        "PWD": "/tmp/demo"
+    ]
+
+    let cliEnvelope = HookPayloadMapper.makeEnvelope(
+        source: .claude,
+        arguments: [
+            "island-bridge",
+            "--source", "claude",
+            "--client-kind", "qoder-cli",
+            "--client-name", "Qoder CLI",
+            "--client-origin", "cli",
+            "--client-originator", "Qoder"
+        ],
+        environment: environment,
+        stdinData: payload
+    )
+    let desktopEnvelope = HookPayloadMapper.makeEnvelope(
+        source: .claude,
+        arguments: [
+            "island-bridge",
+            "--source", "claude",
+            "--client-kind", "qoder"
+        ],
+        environment: environment,
+        stdinData: payload
+    )
+
+    #expect(cliEnvelope.metadata["source_process_name"] == "qodercli")
+    #expect(HookPayloadMapper.shouldDeliverEnvelope(cliEnvelope))
+    #expect(!HookPayloadMapper.shouldDeliverEnvelope(desktopEnvelope))
+}
+
+@Test
 func qoderCLIAnsweredPermissionRequestKeepsBridgeResponseOpenForReplay() throws {
     let payload = """
     {
@@ -1387,6 +1433,53 @@ func qoderCLIAnsweredPermissionRequestKeepsBridgeResponseOpenForReplay() throws 
 
     #expect(envelope.eventType == "PermissionRequest")
     #expect(envelope.status?.kind == .active)
+    #expect(envelope.expectsResponse == true)
+    #expect(envelope.intervention == nil)
+    #expect(HookPayloadMapper.shouldDeliverEnvelope(envelope))
+}
+
+@Test
+func qoderCLIQuestionsOnlyPermissionRequestKeepsBridgeResponseOpenForReplay() throws {
+    let payload = """
+    {
+      "hook_event_name": "PermissionRequest",
+      "session_id": "qoder-cli-questions-only",
+      "tool_name": "AskUserQuestion",
+      "tool_input": {
+        "questions": [
+          {
+            "header": "Task type",
+            "question": "What would you like to work on today?",
+            "options": [
+              {"label": "Write new code"},
+              {"label": "Debug or fix a bug"}
+            ]
+          }
+        ]
+      }
+    }
+    """.data(using: .utf8)!
+
+    let envelope = HookPayloadMapper.makeEnvelope(
+        source: .claude,
+        arguments: [
+            "island-bridge",
+            "--source", "claude",
+            "--client-kind", "qoder-cli",
+            "--client-name", "Qoder CLI",
+            "--client-origin", "cli",
+            "--client-originator", "Qoder"
+        ],
+        environment: [
+            "TERM_PROGRAM": "iTerm.app",
+            "__CFBundleIdentifier": "com.googlecode.iterm2",
+            "PWD": "/tmp/demo"
+        ],
+        stdinData: payload
+    )
+
+    #expect(envelope.eventType == "PermissionRequest")
+    #expect(envelope.status?.kind == .waitingForApproval)
     #expect(envelope.expectsResponse == true)
     #expect(envelope.intervention == nil)
     #expect(HookPayloadMapper.shouldDeliverEnvelope(envelope))
@@ -1993,6 +2086,33 @@ func qoderCLIAnswerPayloadUsesTopLevelShapeWhenClientKindIsMissing() throws {
     let updatedInput = try #require(decision["updatedInput"] as? [String: Any])
     let answers = try #require(updatedInput["answers"] as? [String: String])
     #expect(answers["Which model?"] == "Pro")
+}
+
+@Test
+func qoderCLIPermissionApprovalPayloadDoesNotRepeatAnswers() throws {
+    let response = BridgeResponse(
+        requestID: UUID(),
+        decision: .approve
+    )
+
+    let payload = HookPayloadMapper.stdoutPayload(
+        for: .claude,
+        response: response,
+        eventType: "PermissionRequest",
+        metadata: [
+            "client_kind": "qoder-cli",
+            "client_name": "Qoder CLI",
+            "tool_name": "AskUserQuestion"
+        ]
+    )
+
+    let json = try #require(JSONSerialization.jsonObject(with: Data(payload.utf8)) as? [String: Any])
+    let hookSpecificOutput = try #require(json["hookSpecificOutput"] as? [String: Any])
+    #expect(hookSpecificOutput["hookEventName"] as? String == "PermissionRequest")
+    #expect(hookSpecificOutput["updatedInput"] == nil)
+    let decision = try #require(hookSpecificOutput["decision"] as? [String: Any])
+    #expect(decision["behavior"] as? String == "allow")
+    #expect(decision["updatedInput"] == nil)
 }
 
 @Test

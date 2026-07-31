@@ -1,0 +1,8 @@
+$(SRCROOT)/Prototype/Package.swift
+$(SRCROOT)/Prototype/Sources/IslandBridge/main.swift
+$(SRCROOT)/Prototype/Sources/IslandShared/BridgeCodec.swift
+$(SRCROOT)/Prototype/Sources/IslandShared/BridgeDebugLogPolicy.swift
+$(SRCROOT)/Prototype/Sources/IslandShared/BridgeRuntimeConfig.swift
+$(SRCROOT)/Prototype/Sources/IslandShared/HookPayloadMapper.swift
+$(SRCROOT)/Prototype/Sources/IslandShared/Models.swift
+$(SRCROOT)/scripts/embed-ping-island-bridge.sh

@@ -197,7 +197,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         screenObserver = nil
         UserIdleAutoProtection.shared.stop()
-        startupSessionMonitor.stopMonitoring()
+        if !launchConfiguration.isRunningTests {
+            startupSessionMonitor.stopMonitoring()
+        }
         Task {
             await TelemetryService.shared.stop()
         }

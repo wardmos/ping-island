@@ -92,6 +92,15 @@ public enum HookPayloadMapper {
             return false
         }
 
+        // Qoder IDE and Qoder CLI share ~/.qoder/settings.json, so both
+        // PingIsland hook profiles are invoked for CLI processes. Keep the
+        // explicit CLI hook as the sole owner of those events; otherwise the
+        // legacy IDE hook duplicates questions and can overwrite CLI session
+        // identity.
+        if isQoderDesktopHookInvokedByCLI(envelope) {
+            return false
+        }
+
         guard isQoderIDEHostedEnvelope(envelope) else {
             return true
         }
@@ -521,12 +530,17 @@ public enum HookPayloadMapper {
             return false
         }
 
+        if isQoderCLIQuestionPermissionRequest(
+            eventType: eventType,
+            payload: payload,
+            clientKind: clientKind,
+            explicitClientKind: explicitClientKind
+        ) {
+            return true
+        }
+
         if hasAnsweredQuestionPayload(payload) {
-            return isQoderCLIAnsweredQuestionPermissionRequest(
-                eventType: eventType,
-                clientKind: clientKind,
-                explicitClientKind: explicitClientKind
-            )
+            return false
         }
 
         if let intervention {
@@ -1425,6 +1439,14 @@ public enum HookPayloadMapper {
             return false
         }
 
+        // Process discovery can still find Qoder.app while qodercli is running
+        // in a standalone terminal. The explicit CLI profile must keep its
+        // lifecycle events in that case so sessions and notifications remain
+        // visible.
+        if isQoderCLIClientKind(clientKind), isQoderCLIProcess(envelope) {
+            return false
+        }
+
         return [
             envelope.terminalContext.terminalBundleID,
             envelope.terminalContext.ideBundleID,
@@ -1437,6 +1459,27 @@ public enum HookPayloadMapper {
             return normalizedBundleIdentifier == "com.qoder.ide"
                 || normalizedBundleIdentifier == "com.aliyun.lingma.ide"
         }
+    }
+
+    private static func isQoderDesktopHookInvokedByCLI(_ envelope: BridgeEnvelope) -> Bool {
+        let clientKind = envelope.metadata["client_kind"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        guard clientKind == "qoder" || clientKind == "qoder-cn" else {
+            return false
+        }
+        return isQoderCLIProcess(envelope)
+    }
+
+    private static func isQoderCLIProcess(_ envelope: BridgeEnvelope) -> Bool {
+        let processName = envelope.metadata["source_process_name"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        guard let processName else { return false }
+        return processName == "qodercli"
+            || processName == "qoderclicn"
+            || processName.hasPrefix("qodercli-")
+            || processName.hasPrefix("qoderclicn-")
     }
 
     private static func isQuestionNotificationEnvelope(_ envelope: BridgeEnvelope) -> Bool {
@@ -1701,13 +1744,16 @@ public enum HookPayloadMapper {
         return false
     }
 
-    private static func isQoderCLIAnsweredQuestionPermissionRequest(
+    private static func isQoderCLIQuestionPermissionRequest(
         eventType: String,
+        payload: [String: Any],
         clientKind: String?,
         explicitClientKind: String?
     ) -> Bool {
         eventType == "PermissionRequest"
             && (isQoderCLIClientKind(clientKind) || isQoderCLIClientKind(explicitClientKind))
+            && normalizedToolName(from: payload) == "askuserquestion"
+            && questionPayloads(from: payload)?.isEmpty == false
     }
 
     private static func answeredQuestionStatus(eventType: String) -> SessionStatus {

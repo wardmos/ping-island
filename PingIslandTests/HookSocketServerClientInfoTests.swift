@@ -2,6 +2,26 @@ import XCTest
 @testable import Ping_Island
 
 final class HookSocketServerClientInfoTests: XCTestCase {
+    func testQoderCLIProcessIgnoresIDEHintForExplicitCLIProfile() {
+        XCTAssertEqual(
+            HookSocketServer.qoderCLIProfileSkipDecision(
+                clientKind: "qoder-cli",
+                sourceProcessName: "qodercli"
+            ),
+            false
+        )
+    }
+
+    func testQoderCLIProcessSkipsDuplicateDesktopProfile() {
+        XCTAssertEqual(
+            HookSocketServer.qoderCLIProfileSkipDecision(
+                clientKind: "qoder",
+                sourceProcessName: "qodercli"
+            ),
+            true
+        )
+    }
+
     func testTerminalHostBundlePrefersStandaloneTerminalOverIDEHint() {
         XCTAssertEqual(
             HookSocketServer.resolvedTerminalHostBundleIdentifier(

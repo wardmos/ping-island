@@ -87,6 +87,10 @@ struct RecentInterventionResponseStore {
             return true
         }
 
+        if isQoderCLIQuestionEvent(event) {
+            return true
+        }
+
         let normalizedTool = event.tool?
             .lowercased()
             .replacingOccurrences(of: "_", with: "")
@@ -105,6 +109,10 @@ struct RecentInterventionResponseStore {
             return true
         }
 
+        if isQoderCLIQuestionEvent(event) {
+            return event.event == "PermissionRequest"
+        }
+
         let normalizedTool = event.tool?
             .lowercased()
             .replacingOccurrences(of: "_", with: "")
@@ -119,6 +127,16 @@ struct RecentInterventionResponseStore {
             && event.event == "PermissionRequest"
             && normalizedTool == "askuserquestion"
             && isPlainClaudeCode
+    }
+
+    private static func isQoderCLIQuestionEvent(_ event: HookEvent) -> Bool {
+        let normalizedTool = event.tool?
+            .lowercased()
+            .replacingOccurrences(of: "_", with: "")
+            .replacingOccurrences(of: "-", with: "")
+        return event.provider == .claude
+            && event.clientInfo.isQoderCLIClient
+            && normalizedTool == "askuserquestion"
     }
 
     private static func isCodeBuddyCLIQuestionNotification(_ event: HookEvent) -> Bool {

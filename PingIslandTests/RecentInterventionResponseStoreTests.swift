@@ -223,14 +223,14 @@ final class RecentInterventionResponseStoreTests: XCTestCase {
         XCTAssertEqual(replay?.updatedInput?["answers"]?.value as? [String: String], ["project": "会话层"])
     }
 
-    func testQoderCLIAnswerCanReplayToAnsweredPermissionRequestInsideQoderIDE() {
+    func testQoderCLIAnswerReplaysIntoQuestionsOnlyPermissionRequest() {
         var store = RecentInterventionResponseStore(ttl: 30)
         let clientInfo = SessionClientInfo(
             kind: .qoder,
             profileID: "qoder-cli",
             name: "Qoder CLI",
             origin: "cli",
-            terminalBundleIdentifier: "com.qoder.ide"
+            terminalBundleIdentifier: "com.googlecode.iterm2"
         )
 
         let questionEvent = HookEvent(
@@ -260,11 +260,11 @@ final class RecentInterventionResponseStoreTests: XCTestCase {
             message: nil
         )
 
-        let answeredPermissionEvent = HookEvent(
+        let permissionEvent = HookEvent(
             sessionId: "qoder-cli-session",
             cwd: "/tmp/project",
             event: "PermissionRequest",
-            status: "processing",
+            status: "waiting_for_approval",
             provider: .claude,
             clientInfo: clientInfo,
             pid: nil,
@@ -280,9 +280,6 @@ final class RecentInterventionResponseStoreTests: XCTestCase {
                             ["label": "Debug or fix a bug"]
                         ]
                     ]
-                ]),
-                "answers": AnyCodable([
-                    "What would you like to work on today?": "Write new code"
                 ])
             ],
             toolUseId: nil,
@@ -303,7 +300,7 @@ final class RecentInterventionResponseStoreTests: XCTestCase {
         )
 
         let replay = store.response(
-            for: answeredPermissionEvent,
+            for: permissionEvent,
             now: Date(timeIntervalSince1970: 101)
         )
 

@@ -131,4 +131,44 @@ final class HookEventResponseRoutingTests: XCTestCase {
         XCTAssertTrue(event.expectsResponse)
         XCTAssertNil(event.intervention)
     }
+
+    func testQoderCLIQuestionsOnlyPermissionRequestStillExpectsReplayResponse() {
+        let event = HookEvent(
+            sessionId: "qoder-cli-session",
+            cwd: "/tmp/project",
+            event: "PermissionRequest",
+            status: "waiting_for_approval",
+            provider: .claude,
+            clientInfo: SessionClientInfo(
+                kind: .qoder,
+                profileID: "qoder-cli",
+                name: "Qoder CLI",
+                origin: "cli",
+                terminalBundleIdentifier: "com.googlecode.iterm2"
+            ),
+            pid: nil,
+            tty: nil,
+            tool: "AskUserQuestion",
+            toolInput: [
+                "questions": AnyCodable([
+                    [
+                        "header": "Task type",
+                        "question": "What would you like to work on today?",
+                        "options": [
+                            ["label": "Write new code"],
+                            ["label": "Debug or fix a bug"]
+                        ]
+                    ]
+                ])
+            ],
+            toolUseId: nil,
+            notificationType: nil,
+            message: nil,
+            bridgeExpectsResponse: true
+        )
+
+        XCTAssertFalse(event.isAnsweredAskUserQuestionEvent)
+        XCTAssertFalse(event.isAskUserQuestionRequest)
+        XCTAssertTrue(event.expectsResponse)
+    }
 }
