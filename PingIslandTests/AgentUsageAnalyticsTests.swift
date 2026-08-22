@@ -101,6 +101,116 @@ final class AgentUsageAnalyticsTests: XCTestCase {
         XCTAssertEqual(cost, 16.875, accuracy: 0.000_001)
     }
 
+    func testSnapshotBuildsRecentTodaySessionsAndCalendarWeekTopSession() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        calendar.firstWeekday = 2
+        let now = calendar.date(from: DateComponents(
+            year: 2026,
+            month: 4,
+            day: 10,
+            hour: 12
+        ))!
+        let today = AgentUsageStore.dayKey(for: now, calendar: calendar)
+        let mondayDate = calendar.date(byAdding: .day, value: -4, to: now)!
+        let monday = AgentUsageStore.dayKey(for: mondayDate, calendar: calendar)
+        let previousSundayDate = calendar.date(byAdding: .day, value: -5, to: now)!
+        let previousSunday = AgentUsageStore.dayKey(for: previousSundayDate, calendar: calendar)
+
+        let document = AgentUsageDocument(
+            buckets: [
+                today: AgentUsageDailyBucket(
+                    day: today,
+                    sessionRecords: [
+                        "oldest": AgentUsageSessionRecord(
+                            sessionID: "oldest",
+                            agent: "Claude Code",
+                            title: "Oldest today",
+                            lastActivityAt: now.addingTimeInterval(-4_000),
+                            tokenTotals: AgentUsageTokenTotals(total: 100)
+                        ),
+                        "recent-1": AgentUsageSessionRecord(
+                            sessionID: "recent-1",
+                            agent: "Codex",
+                            title: "Recent one",
+                            lastActivityAt: now.addingTimeInterval(-300),
+                            tokenTotals: AgentUsageTokenTotals(total: 200)
+                        ),
+                        "recent-2": AgentUsageSessionRecord(
+                            sessionID: "recent-2",
+                            agent: "Claude Code",
+                            title: "Recent two",
+                            lastActivityAt: now.addingTimeInterval(-200),
+                            tokenTotals: AgentUsageTokenTotals(total: 300)
+                        ),
+                        "recent-3": AgentUsageSessionRecord(
+                            sessionID: "recent-3",
+                            agent: "Codex",
+                            title: "Recent three",
+                            lastActivityAt: now.addingTimeInterval(-100),
+                            tokenTotals: AgentUsageTokenTotals(total: 50)
+                        ),
+                    ]
+                ),
+                monday: AgentUsageDailyBucket(
+                    day: monday,
+                    sessionRecords: [
+                        "recent-1": AgentUsageSessionRecord(
+                            sessionID: "recent-1",
+                            agent: "Codex",
+                            title: "Recent one",
+                            lastActivityAt: mondayDate,
+                            tokenTotals: AgentUsageTokenTotals(total: 500)
+                        ),
+                    ]
+                ),
+                previousSunday: AgentUsageDailyBucket(
+                    day: previousSunday,
+                    sessionRecords: [
+                        "recent-2": AgentUsageSessionRecord(
+                            sessionID: "recent-2",
+                            agent: "Claude Code",
+                            title: "Recent two",
+                            lastActivityAt: previousSundayDate,
+                            tokenTotals: AgentUsageTokenTotals(total: 2_000)
+                        ),
+                    ]
+                ),
+            ]
+        )
+
+        let snapshot = AgentUsageStore.makeSnapshot(
+            range: .sevenDays,
+            document: document,
+            now: now,
+            calendar: calendar
+        )
+
+        XCTAssertEqual(snapshot.recentTodaySessions.map(\.sessionID), ["recent-3", "recent-2", "recent-1"])
+        XCTAssertEqual(snapshot.recentTodayTokenTotals.resolvedTotal, 550)
+        XCTAssertEqual(snapshot.topSessionThisWeek?.sessionID, "recent-1")
+        XCTAssertEqual(snapshot.topSessionThisWeek?.tokenTotals.resolvedTotal, 700)
+    }
+
+    func testDailyBucketDecodesLegacyDocumentWithoutSessionRecords() throws {
+        let data = try XCTUnwrap(
+            """
+            {
+              "day": "2026-04-10",
+              "sessionIDsByAgent": {"Codex": ["codex-1"]},
+              "toolCounts": {},
+              "tokenTotals": {"input": 10, "output": 5, "total": 15},
+              "activityCount": 1
+            }
+            """.data(using: .utf8)
+        )
+
+        let bucket = try JSONDecoder().decode(AgentUsageDailyBucket.self, from: data)
+
+        XCTAssertTrue(bucket.sessionRecords.isEmpty)
+        XCTAssertEqual(bucket.tokenTotals.resolvedTotal, 15)
+    }
+
     func testSnapshotRankingsAreLimitedToTopFive() {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(secondsFromGMT: 0)!
@@ -179,5 +289,8 @@ final class AgentUsageAnalyticsTests: XCTestCase {
 
         XCTAssertEqual(snapshot.tokenTotals, AgentUsageTokenTotals(input: 75, output: 30, total: 105))
         XCTAssertEqual(snapshot.sessionCount, 1)
+        XCTAssertEqual(snapshot.recentTodaySessions.map(\.sessionID), ["019db9a7-336a-7b62-9288-7304c3d2d4b9"])
+        XCTAssertEqual(snapshot.recentTodayTokenTotals, AgentUsageTokenTotals(input: 75, output: 30, total: 105))
+        XCTAssertEqual(snapshot.topSessionThisWeek?.tokenTotals, AgentUsageTokenTotals(input: 75, output: 30, total: 105))
     }
 }

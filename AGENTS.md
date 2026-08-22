@@ -24,6 +24,8 @@ This file is a routing layer for coding agents working in this repo. Keep it sho
 - Main state hub: `PingIsland/Services/State/SessionStore.swift`
 - Session association cache: `PingIsland/Services/State/SessionAssociationStore.swift`
 - Usage/quota snapshots for Claude status-line caches, Claude-family transcript token totals, and Codex rollout logs: `PingIsland/Services/Usage/`
+  - Claude-family transcript token totals are tailed incrementally by `ClaudeTranscriptUsageReader`, which skips reopening unchanged files, rebuilds only after replacement/truncation, defers half-written trailing records, and carries a streaming FNV-1a digest so `AgentUsageStore` deduplication stays stable. Keep cumulative totals for the whole transcript, and do not return to whole-file reparsing for ordinary appends.
+  - Local agent usage analytics keeps a backward-compatible per-day session token ledger for the statistics panel's latest-three-today total and current-calendar-week top session; preserve legacy `agent-usage.json` decoding when evolving it
 - Native runtime rollout scaffold: `PingIsland/Services/Runtime/`, `PingIsland/Core/FeatureFlags.swift`
 - Session bridge for UI: `PingIsland/Services/Session/SessionMonitor.swift`
 - Notch state and layout: `PingIsland/Core/NotchViewModel.swift`, `PingIsland/UI/Views/NotchView.swift`
@@ -38,6 +40,7 @@ This file is a routing layer for coding agents working in this repo. Keep it sho
   - State-only hook delivery is acknowledged by the app after envelope decoding and routing; keep bridge socket writes complete and do not report `deliveryOutcome=delivered` without a matching app acknowledgement
 - Codex ingress: `PingIsland/Services/Codex/`, `PingIsland/UI/Views/CodexSessionView.swift`
   - Hook-less fallback parsing for Codex sessions lives in `PingIsland/Services/Codex/CodexRolloutParser.swift`
+  - The fallback parser tails append-only rollout JSONL incrementally, rebuilds after file replacement/truncation, skips pathological oversized records, and retains a bounded recent history. Keep the full content of each retained item, and do not return to whole-file reparsing for ordinary appends.
 - Terminal and focus control: `PingIsland/Services/Tmux/`, `PingIsland/Services/Window/`, `PingIsland/Utilities/TerminalVisibilityDetector.swift`
   - Terminal focus flows currently cover iTerm2, Ghostty, Terminal.app, tmux, and IDE-hosted terminals
 - Remote SSH forwarding and remote-host management: `PingIsland/Services/Remote/`
@@ -110,7 +113,7 @@ This file is a routing layer for coding agents working in this repo. Keep it sho
 - If you change tmux or terminal focusing, trace through `Services/Tmux`, `Services/Window`, and `TerminalVisibilityDetector`.
 - If you change IDE terminal jump behavior, inspect both `TerminalSessionFocuser` and `IDEExtensionInstaller`, plus the integration settings UI so install state and URI schemes stay aligned.
 - If you change Codex behavior, verify both the monitor layer under `PingIsland/Services/Codex/` and the UI under `PingIsland/UI/Views/CodexSessionView.swift`.
-  - Long Codex/subagent prompts, results, tool details, and transcript rows must keep full data in `SessionStore` / snapshots and apply bounded display text only at SwiftUI rendering boundaries. Prefer `SessionTextSanitizer.boundedDisplayText` for inline `Text` / Markdown content, add or preserve tests for truncation behavior, and avoid passing unbounded transcripts directly into expanded Island detail views.
+  - Long Codex/subagent prompts, results, tool details, and retained transcript rows must keep their full item data in `SessionStore` / snapshots and apply bounded display text only at SwiftUI rendering boundaries. Prefer `SessionTextSanitizer.boundedDisplayText` for inline `Text` / Markdown content, add or preserve tests for truncation behavior, and avoid passing unbounded transcripts directly into expanded Island detail views.
 - If you change app updates or release notes, trace through `PingIsland/Services/Update/`, `PingIsland/Info.plist`, the settings UI, and `scripts/create-release.sh` so appcast assets, runtime config, and update messaging stay aligned.
 - If you change Sparkle configuration keys or hosting assumptions, update `Config/App.xcconfig`, `Config/LocalSecrets.example.xcconfig`, `scripts/generate-keys.sh`, and `docs/sparkle-release.md` together.
 - If you change App Store distribution behavior, keep the `PingIslandAppStore` target isolated from the regular `PingIsland` Developer ID/Sparkle lane, and update `docs/mac-app-store-submission.md` plus `scripts/build-app-store.sh` together.

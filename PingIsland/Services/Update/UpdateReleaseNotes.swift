@@ -73,7 +73,7 @@ enum UpdateReleaseNotesParser {
         }
 
         var sections: [UpdateReleaseNotesSection] = []
-        var currentTitle = "更新内容"
+        var currentTitle = defaultSectionTitle(for: locale)
         var currentLines: [String] = []
         var sectionIndex = 0
 
@@ -148,6 +148,11 @@ enum UpdateReleaseNotesParser {
     private static func preferredLanguageCode(for locale: Locale?) -> String {
         let languageCode = locale?.identifier.lowercased() ?? "en"
         return languageCode.hasPrefix("zh") ? "zh-Hans" : "en"
+    }
+
+    private static func defaultSectionTitle(for locale: Locale?) -> String {
+        guard let locale else { return "更新内容" }
+        return preferredLanguageCode(for: locale) == "zh-Hans" ? "更新内容" : "What's New"
     }
 
     private static func localizedBlocks(from markdown: String) -> [String: String] {

@@ -31,6 +31,22 @@ final class UpdateReleaseNotesParserTests: XCTestCase {
         XCTAssertTrue(sections[0].markdown.contains("第一条"))
     }
 
+    func testParserLocalizesFallbackSectionTitle() {
+        let markdown = "- One improvement"
+
+        let englishSections = UpdateReleaseNotesParser.sections(
+            from: markdown,
+            locale: Locale(identifier: "en")
+        )
+        let chineseSections = UpdateReleaseNotesParser.sections(
+            from: markdown,
+            locale: Locale(identifier: "zh-Hans")
+        )
+
+        XCTAssertEqual(englishSections.first?.title, "What's New")
+        XCTAssertEqual(chineseSections.first?.title, "更新内容")
+    }
+
     func testParserPrefersChineseLocalizedBlockForChineseLocale() {
         let markdown = """
         <!-- zh-Hans -->

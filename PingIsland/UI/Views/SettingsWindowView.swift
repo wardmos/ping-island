@@ -922,6 +922,8 @@ private struct AgentUsageAnalyticsContent: View {
 
             spendCard
 
+            sessionHighlightsCard
+
             activityMapCard
 
             overviewCard
@@ -967,6 +969,14 @@ private struct AgentUsageAnalyticsContent: View {
     private var spendCard: some View {
         SettingsSectionCard(title: "Token 费用预估") {
             AgentUsageSpendPanel(summary: viewModel.snapshot.spendSummary)
+                .padding(.horizontal, 18)
+                .padding(.vertical, 16)
+        }
+    }
+
+    private var sessionHighlightsCard: some View {
+        SettingsSectionCard(title: "会话 Token 统计") {
+            AgentUsageSessionHighlightsPanel(snapshot: viewModel.snapshot)
                 .padding(.horizontal, 18)
                 .padding(.vertical, 16)
         }
@@ -1305,6 +1315,223 @@ private struct AgentUsageSpendPanel: View {
             AgentUsageSpendFooter(summary: summary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct AgentUsageSessionHighlightsPanel: View {
+    let snapshot: AgentUsageDashboardSnapshot
+
+    private let spacing: CGFloat = 14
+
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .top, spacing: spacing) {
+                AgentUsageRecentSessionsCard(
+                    sessions: snapshot.recentTodaySessions,
+                    tokenTotals: snapshot.recentTodayTokenTotals
+                )
+                AgentUsageTopSessionCard(session: snapshot.topSessionThisWeek)
+            }
+
+            VStack(spacing: spacing) {
+                AgentUsageRecentSessionsCard(
+                    sessions: snapshot.recentTodaySessions,
+                    tokenTotals: snapshot.recentTodayTokenTotals
+                )
+                AgentUsageTopSessionCard(session: snapshot.topSessionThisWeek)
+            }
+        }
+    }
+}
+
+private struct AgentUsageRecentSessionsCard: View {
+    let sessions: [AgentUsageSessionRecord]
+    let tokenTotals: AgentUsageTokenTotals
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            AgentUsageSessionCardHeader(
+                icon: "clock.arrow.circlepath",
+                title: "今日最近 3 个会话",
+                tint: SettingsCategory.analytics.tint
+            )
+
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(verbatim: AgentUsageFormat.compactTokenCount(tokenTotals.resolvedTotal))
+                    .font(.system(size: 26, weight: .bold, design: .rounded))
+                    .foregroundColor(.white.opacity(0.94))
+                    .monospacedDigit()
+                    .help(AgentUsageFormat.integer(tokenTotals.resolvedTotal))
+
+                Text(appLocalized: "Tokens 合计")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(.white.opacity(0.42))
+            }
+
+            if sessions.isEmpty {
+                AgentUsageEmptyLine(title: "今天还没有会话记录")
+                    .padding(.vertical, 14)
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(Array(sessions.enumerated()), id: \.element.id) { index, session in
+                        AgentUsageSessionSpendRow(session: session)
+                        if index < sessions.count - 1 {
+                            AgentUsageInsetDivider()
+                        }
+                    }
+                }
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, minHeight: 220, alignment: .topLeading)
+        .background(AgentUsageSessionCardBackground(tint: SettingsCategory.analytics.tint))
+    }
+}
+
+private struct AgentUsageTopSessionCard: View {
+    let session: AgentUsageSessionRecord?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            AgentUsageSessionCardHeader(
+                icon: "trophy.fill",
+                title: "本周最高消耗会话",
+                tint: TerminalColors.blue
+            )
+
+            if let session {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(verbatim: AgentUsageFormat.sessionTitle(session))
+                        .font(.system(size: 17, weight: .bold))
+                        .foregroundColor(.white.opacity(0.92))
+                        .lineLimit(2)
+                        .truncationMode(.tail)
+                        .help(AgentUsageFormat.sessionTitle(session))
+
+                    Text(verbatim: session.agent)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(TerminalColors.blue.opacity(0.84))
+                        .lineLimit(1)
+                }
+
+                Spacer(minLength: 8)
+
+                Text(verbatim: AgentUsageFormat.compactTokenCount(session.tokenTotals.resolvedTotal))
+                    .font(.system(size: 30, weight: .bold, design: .rounded))
+                    .foregroundColor(.white.opacity(0.95))
+                    .monospacedDigit()
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.62)
+                    .help(AgentUsageFormat.integer(session.tokenTotals.resolvedTotal))
+
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(appLocalized: "本周累计 Tokens")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(.white.opacity(0.42))
+
+                    Spacer(minLength: 8)
+
+                    Text(verbatim: AppLocalization.format(
+                        "%@ 预估",
+                        AgentUsageFormat.compactUSD(
+                            AgentUsageCostEstimator.estimateUSD(for: session.tokenTotals)
+                        )
+                    ))
+                        .font(.system(size: 11, weight: .bold, design: .rounded))
+                        .foregroundColor(TerminalColors.blue.opacity(0.90))
+                        .monospacedDigit()
+                }
+            } else {
+                AgentUsageEmptyLine(title: "本周还没有会话 Token 记录")
+                    .padding(.vertical, 14)
+                Spacer(minLength: 0)
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, minHeight: 220, alignment: .topLeading)
+        .background(AgentUsageSessionCardBackground(tint: TerminalColors.blue))
+    }
+}
+
+private struct AgentUsageSessionCardHeader: View {
+    let icon: String
+    let title: String
+    let tint: Color
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: icon)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundColor(tint.opacity(0.92))
+                .frame(width: 24, height: 24)
+                .background(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(tint.opacity(0.16))
+                )
+
+            Text(appLocalized: title)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundColor(.white.opacity(0.66))
+                .lineLimit(1)
+
+            Spacer(minLength: 0)
+        }
+    }
+}
+
+private struct AgentUsageSessionSpendRow: View {
+    let session: AgentUsageSessionRecord
+
+    var body: some View {
+        HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(verbatim: AgentUsageFormat.sessionTitle(session))
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(.white.opacity(0.82))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .help(AgentUsageFormat.sessionTitle(session))
+
+                Text(verbatim: session.agent)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundColor(.white.opacity(0.38))
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: 8)
+
+            Text(verbatim: AppLocalization.format(
+                "%@ Tokens",
+                AgentUsageFormat.compactTokenCount(session.tokenTotals.resolvedTotal)
+            ))
+                .font(.system(size: 11, weight: .bold, design: .rounded))
+                .foregroundColor(.white.opacity(0.70))
+                .monospacedDigit()
+                .lineLimit(1)
+                .help(AgentUsageFormat.integer(session.tokenTotals.resolvedTotal))
+        }
+        .padding(.vertical, 8)
+    }
+}
+
+private struct AgentUsageSessionCardBackground: View {
+    let tint: Color
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: 16, style: .continuous)
+            .fill(Color.white.opacity(0.035))
+            .overlay(
+                LinearGradient(
+                    colors: [tint.opacity(0.11), Color.clear],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .strokeBorder(tint.opacity(0.16), lineWidth: 1)
+            )
     }
 }
 
@@ -2129,6 +2356,14 @@ private enum AgentUsageFormat {
 
     static func shortMonth(_ date: Date) -> String {
         shortMonthFormatter.string(from: date)
+    }
+
+    static func sessionTitle(_ session: AgentUsageSessionRecord) -> String {
+        if let title = session.title?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !title.isEmpty {
+            return title
+        }
+        return "\(session.agent) · \(session.sessionID.suffix(8))"
     }
 
     private static func compactMetric(
@@ -3196,7 +3431,7 @@ private struct SettingsPanelContentView: View {
                     ),
                     range: Double(BridgeRuntimeConfigSnapshot.minimumDebugLogRetentionDays)...Double(BridgeRuntimeConfigSnapshot.maximumDebugLogRetentionDays),
                     step: 1,
-                    format: { "\(Int($0.rounded())) 天" }
+                    format: { AppLocalization.format("%lld 天", Int64($0.rounded())) }
                 )
                 .disabled(!settings.hookDebugLoggingEnabled)
                 .opacity(settings.hookDebugLoggingEnabled ? 1 : 0.45)
@@ -4348,18 +4583,18 @@ private struct CustomHookInstallSheet: View {
 
     private var installPathPlaceholder: String {
         guard let profile = ClientProfileRegistry.managedHookProfile(id: selectedProfileID) else {
-            return "例如 /path/to/.claude"
+            return AppLocalization.string("例如 /path/to/.claude")
         }
 
         switch profile.installationKind {
         case .jsonHooks, .tomlHooks:
-            return "例如 /path/to/.claude"
+            return AppLocalization.string("例如 /path/to/.claude")
         case .pluginFile:
-            return "例如 /path/to/plugins"
+            return AppLocalization.string("例如 /path/to/plugins")
         case .pluginDirectory:
-            return "例如 /path/to/.hermes 或 /path/to/plugins"
+            return AppLocalization.string("例如 /path/to/.hermes 或 /path/to/plugins")
         case .hookDirectory:
-            return "例如 /path/to/.openclaw 或 /path/to/hooks"
+            return AppLocalization.string("例如 /path/to/.openclaw 或 /path/to/hooks")
         }
     }
 
@@ -6762,7 +6997,7 @@ private struct SoundPreviewButton: View {
         }
         .buttonStyle(.plain)
         .disabled(!isEnabled)
-        .help("试听")
+        .help(AppLocalization.string("试听"))
     }
 }
 

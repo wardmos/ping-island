@@ -88,7 +88,9 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
 
     private init() {
         let hostingController = NSHostingController(
-            rootView: SettingsWindowView()
+            rootView: AppLocalizedRootView {
+                SettingsWindowView()
+            }
         )
         let window = SettingsPanelWindow(
             contentRect: NSRect(origin: .zero, size: defaultContentSize),
@@ -120,14 +122,16 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         super.init(window: window)
 
         self.window?.delegate = self
-        hostingController.rootView = SettingsWindowView(
-            onClose: { [weak self] in
-                self?.dismiss()
-            },
-            onMinimize: { [weak self] in
-                self?.window?.miniaturize(nil)
-            }
-        )
+        hostingController.rootView = AppLocalizedRootView {
+            SettingsWindowView(
+                onClose: { [weak self] in
+                    self?.dismiss()
+                },
+                onMinimize: { [weak self] in
+                    self?.window?.miniaturize(nil)
+                }
+            )
+        }
     }
 
     required init?(coder: NSCoder) {

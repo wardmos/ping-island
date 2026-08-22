@@ -83,6 +83,47 @@ struct AgentUsageRankItem: Equatable, Identifiable, Sendable {
     nonisolated var id: String { name }
 }
 
+struct AgentUsageSessionRecord: Codable, Equatable, Identifiable, Sendable {
+    let sessionID: String
+    var agent: String
+    var title: String?
+    var lastActivityAt: Date
+    var tokenTotals: AgentUsageTokenTotals
+
+    nonisolated var id: String { sessionID }
+
+    nonisolated init(
+        sessionID: String,
+        agent: String,
+        title: String? = nil,
+        lastActivityAt: Date,
+        tokenTotals: AgentUsageTokenTotals = AgentUsageTokenTotals()
+    ) {
+        self.sessionID = sessionID
+        self.agent = agent
+        self.title = Self.nonEmpty(title)
+        self.lastActivityAt = lastActivityAt
+        self.tokenTotals = tokenTotals
+    }
+
+    nonisolated mutating func recordActivity(agent: String, title: String?, at date: Date) {
+        self.agent = agent
+        if let title = Self.nonEmpty(title) {
+            self.title = title
+        }
+        lastActivityAt = max(lastActivityAt, date)
+    }
+
+    nonisolated mutating func recordTokens(_ totals: AgentUsageTokenTotals) {
+        tokenTotals.add(totals)
+    }
+
+    private nonisolated static func nonEmpty(_ value: String?) -> String? {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed?.isEmpty == false ? trimmed : nil
+    }
+}
+
 struct AgentUsageHeatmapDay: Equatable, Identifiable, Sendable {
     let date: Date
     let activityCount: Int
@@ -181,6 +222,7 @@ struct AgentUsageDashboardSnapshot: Equatable, Sendable {
     private nonisolated static let heatmapDayCount = 180
     private nonisolated static let trendDayCount = 7
     private nonisolated static let spendDayCount = 30
+    private nonisolated static let recentSessionLimit = 3
 
     let range: AgentUsageRange
     let sessionCount: Int
@@ -191,6 +233,9 @@ struct AgentUsageDashboardSnapshot: Equatable, Sendable {
     let heatmapDays: [AgentUsageHeatmapDay]
     let trendPoints: [AgentUsageTrendPoint]
     let spendSummary: AgentUsageSpendSummary
+    let recentTodaySessions: [AgentUsageSessionRecord]
+    let recentTodayTokenTotals: AgentUsageTokenTotals
+    let topSessionThisWeek: AgentUsageSessionRecord?
 
     nonisolated static func empty(range: AgentUsageRange, now: Date = Date(), calendar: Calendar = .current) -> AgentUsageDashboardSnapshot {
         AgentUsageDashboardSnapshot(
@@ -202,7 +247,10 @@ struct AgentUsageDashboardSnapshot: Equatable, Sendable {
             topTools: [],
             heatmapDays: recentHeatmapDays(now: now, buckets: [:], calendar: calendar),
             trendPoints: trendPoints(now: now, buckets: [:], calendar: calendar),
-            spendSummary: Self.spendSummary(now: now, buckets: [:], calendar: calendar)
+            spendSummary: Self.spendSummary(now: now, buckets: [:], calendar: calendar),
+            recentTodaySessions: [],
+            recentTodayTokenTotals: AgentUsageTokenTotals(),
+            topSessionThisWeek: nil
         )
     }
 
@@ -322,6 +370,70 @@ struct AgentUsageDashboardSnapshot: Equatable, Sendable {
 
         return totals
     }
+
+    fileprivate nonisolated static func sessionHighlights(
+        now: Date,
+        buckets: [String: AgentUsageDailyBucket],
+        calendar: Calendar
+    ) -> (
+        recentTodaySessions: [AgentUsageSessionRecord],
+        recentTodayTokenTotals: AgentUsageTokenTotals,
+        topSessionThisWeek: AgentUsageSessionRecord?
+    ) {
+        let todayKey = AgentUsageStore.dayKey(for: now, calendar: calendar)
+        let recentTodaySessions = buckets[todayKey]?.sessionRecords.values
+            .sorted(by: sessionRecencySort)
+            .prefix(recentSessionLimit)
+            .map { $0 } ?? []
+        var recentTodayTokenTotals = AgentUsageTokenTotals()
+        recentTodaySessions.forEach { recentTodayTokenTotals.add($0.tokenTotals) }
+
+        let weekStart = calendar.dateInterval(of: .weekOfYear, for: now)?.start
+            ?? calendar.startOfDay(for: now)
+        let weekStartKey = AgentUsageStore.dayKey(for: weekStart, calendar: calendar)
+        var weeklySessions: [String: AgentUsageSessionRecord] = [:]
+
+        for (day, bucket) in buckets where day >= weekStartKey && day <= todayKey {
+            for record in bucket.sessionRecords.values {
+                if var existing = weeklySessions[record.sessionID] {
+                    existing.recordTokens(record.tokenTotals)
+                    if record.lastActivityAt > existing.lastActivityAt {
+                        existing.recordActivity(agent: record.agent, title: record.title, at: record.lastActivityAt)
+                    }
+                    weeklySessions[record.sessionID] = existing
+                } else {
+                    weeklySessions[record.sessionID] = record
+                }
+            }
+        }
+
+        let topSessionThisWeek = weeklySessions.values
+            .filter { $0.tokenTotals.resolvedTotal > 0 }
+            .sorted(by: sessionSpendSort)
+            .first
+
+        return (recentTodaySessions, recentTodayTokenTotals, topSessionThisWeek)
+    }
+
+    private nonisolated static func sessionRecencySort(
+        _ lhs: AgentUsageSessionRecord,
+        _ rhs: AgentUsageSessionRecord
+    ) -> Bool {
+        if lhs.lastActivityAt == rhs.lastActivityAt {
+            return lhs.sessionID.localizedStandardCompare(rhs.sessionID) == .orderedAscending
+        }
+        return lhs.lastActivityAt > rhs.lastActivityAt
+    }
+
+    private nonisolated static func sessionSpendSort(
+        _ lhs: AgentUsageSessionRecord,
+        _ rhs: AgentUsageSessionRecord
+    ) -> Bool {
+        if lhs.tokenTotals.resolvedTotal == rhs.tokenTotals.resolvedTotal {
+            return sessionRecencySort(lhs, rhs)
+        }
+        return lhs.tokenTotals.resolvedTotal > rhs.tokenTotals.resolvedTotal
+    }
 }
 
 struct CodexTokenUsage: Codable, Equatable, Sendable {
@@ -340,23 +452,80 @@ struct AgentUsageDailyBucket: Codable, Equatable, Sendable {
     var toolCounts: [String: Int]
     var tokenTotals: AgentUsageTokenTotals
     var activityCount: Int
+    var sessionRecords: [String: AgentUsageSessionRecord]
 
     nonisolated init(
         day: String,
         sessionIDsByAgent: [String: Set<String>] = [:],
         toolCounts: [String: Int] = [:],
         tokenTotals: AgentUsageTokenTotals = AgentUsageTokenTotals(),
-        activityCount: Int = 0
+        activityCount: Int = 0,
+        sessionRecords: [String: AgentUsageSessionRecord] = [:]
     ) {
         self.day = day
         self.sessionIDsByAgent = sessionIDsByAgent
         self.toolCounts = toolCounts
         self.tokenTotals = tokenTotals
         self.activityCount = activityCount
+        self.sessionRecords = sessionRecords
     }
 
-    nonisolated mutating func recordSession(agent: String, sessionID: String) {
+    private enum CodingKeys: String, CodingKey {
+        case day
+        case sessionIDsByAgent
+        case toolCounts
+        case tokenTotals
+        case activityCount
+        case sessionRecords
+    }
+
+    nonisolated init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        day = try container.decode(String.self, forKey: .day)
+        sessionIDsByAgent = try container.decodeIfPresent(
+            [String: Set<String>].self,
+            forKey: .sessionIDsByAgent
+        ) ?? [:]
+        toolCounts = try container.decodeIfPresent([String: Int].self, forKey: .toolCounts) ?? [:]
+        tokenTotals = try container.decodeIfPresent(
+            AgentUsageTokenTotals.self,
+            forKey: .tokenTotals
+        ) ?? AgentUsageTokenTotals()
+        activityCount = try container.decodeIfPresent(Int.self, forKey: .activityCount) ?? 0
+        sessionRecords = try container.decodeIfPresent(
+            [String: AgentUsageSessionRecord].self,
+            forKey: .sessionRecords
+        ) ?? [:]
+    }
+
+    nonisolated func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(day, forKey: .day)
+        try container.encode(sessionIDsByAgent, forKey: .sessionIDsByAgent)
+        try container.encode(toolCounts, forKey: .toolCounts)
+        try container.encode(tokenTotals, forKey: .tokenTotals)
+        try container.encode(activityCount, forKey: .activityCount)
+        try container.encode(sessionRecords, forKey: .sessionRecords)
+    }
+
+    nonisolated mutating func recordSession(
+        agent: String,
+        sessionID: String,
+        title: String? = nil,
+        at date: Date = Date()
+    ) {
         sessionIDsByAgent[agent, default: []].insert(sessionID)
+        if var record = sessionRecords[sessionID] {
+            record.recordActivity(agent: agent, title: title, at: date)
+            sessionRecords[sessionID] = record
+        } else {
+            sessionRecords[sessionID] = AgentUsageSessionRecord(
+                sessionID: sessionID,
+                agent: agent,
+                title: title,
+                lastActivityAt: date
+            )
+        }
         activityCount += 1
     }
 
@@ -370,6 +539,13 @@ struct AgentUsageDailyBucket: Codable, Equatable, Sendable {
         if totals.resolvedTotal > 0 {
             activityCount += 1
         }
+    }
+
+    nonisolated mutating func recordTokens(_ totals: AgentUsageTokenTotals, for sessionID: String) {
+        recordTokens(totals)
+        guard var record = sessionRecords[sessionID] else { return }
+        record.recordTokens(totals)
+        sessionRecords[sessionID] = record
     }
 }
 
@@ -465,7 +641,7 @@ actor AgentUsageStore {
         var bucket = document.buckets[day] ?? AgentUsageDailyBucket(day: day)
         let agent = agentLabel(provider: event.provider, clientInfo: event.clientInfo)
         let sessionID = resolvedSessionID ?? event.sessionId
-        bucket.recordSession(agent: agent, sessionID: sessionID)
+        bucket.recordSession(agent: agent, sessionID: sessionID, at: now)
 
         if let toolName = normalizedToolName(event.tool),
            shouldCountToolEvent(event.event),
@@ -490,7 +666,9 @@ actor AgentUsageStore {
         var bucket = document.buckets[day] ?? AgentUsageDailyBucket(day: day)
         bucket.recordSession(
             agent: agentLabel(provider: session.provider, clientInfo: session.clientInfo),
-            sessionID: session.sessionId
+            sessionID: session.sessionId,
+            title: session.displayTitle,
+            at: now
         )
         document.buckets[day] = bucket
         pruneDocument(&document, now: now)
@@ -504,7 +682,9 @@ actor AgentUsageStore {
         var bucket = document.buckets[day] ?? AgentUsageDailyBucket(day: day)
         bucket.recordSession(
             agent: agentLabel(provider: session.provider, clientInfo: session.clientInfo),
-            sessionID: session.sessionId
+            sessionID: session.sessionId,
+            title: session.displayTitle,
+            at: now
         )
 
         for message in payload.messages {
@@ -582,6 +762,7 @@ actor AgentUsageStore {
         sourceKey: String,
         totals currentTotals: AgentUsageTokenTotals,
         capturedAt: Date,
+        sessionTitle: String? = nil,
         sourceFileSize: UInt64? = nil,
         sourceContentHash: String? = nil,
         recordInitialSnapshot: Bool = true,
@@ -629,10 +810,14 @@ actor AgentUsageStore {
         if let sessionID = nonEmpty(sessionID) {
             bucket.recordSession(
                 agent: agentLabel(provider: provider, clientInfo: clientInfo),
-                sessionID: sessionID
+                sessionID: sessionID,
+                title: sessionTitle,
+                at: capturedAt
             )
+            bucket.recordTokens(delta, for: sessionID)
+        } else {
+            bucket.recordTokens(delta)
         }
-        bucket.recordTokens(delta)
         document.buckets[day] = bucket
         pruneDocument(&document, now: now)
         self.document = document
@@ -755,6 +940,11 @@ actor AgentUsageStore {
 
         let sessionCount = agentSessions.values.reduce(0) { $0 + $1.count }
         let toolUseCount = toolCounts.values.reduce(0, +)
+        let sessionHighlights = AgentUsageDashboardSnapshot.sessionHighlights(
+            now: now,
+            buckets: document.buckets,
+            calendar: calendar
+        )
 
         return AgentUsageDashboardSnapshot(
             range: range,
@@ -780,7 +970,10 @@ actor AgentUsageStore {
                 now: now,
                 buckets: document.buckets,
                 calendar: calendar
-            )
+            ),
+            recentTodaySessions: sessionHighlights.recentTodaySessions,
+            recentTodayTokenTotals: sessionHighlights.recentTodayTokenTotals,
+            topSessionThisWeek: sessionHighlights.topSessionThisWeek
         )
     }
 

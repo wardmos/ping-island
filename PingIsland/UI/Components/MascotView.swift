@@ -476,10 +476,12 @@ struct MascotView: View {
     }
 
     private func accessibilityLabel(isIdleProtectionActive: Bool) -> String {
+        let localizedKind = AppLocalization.string(kind.title)
+        let localizedStatus = AppLocalization.string(status.displayName)
         guard isIdleProtectionActive else {
-            return AppLocalization.format("%@ %@", kind.title, status.displayName)
+            return AppLocalization.format("%@ %@", localizedKind, localizedStatus)
         }
-        return AppLocalization.format("%@ %@ 空闲保护中", kind.title, status.displayName)
+        return AppLocalization.format("%@ %@ 空闲保护中", localizedKind, localizedStatus)
     }
 
     private var effectiveAnimationTime: TimeInterval? {

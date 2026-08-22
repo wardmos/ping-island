@@ -160,13 +160,13 @@ final class UpdateManager: NSObject, ObservableObject {
 
     var releaseNotesActionTitle: String {
         if let version = availableVersion {
-            return "查看 v\(version) 更新日志"
+            return AppLocalization.format("查看 v%@ 更新日志", version)
         }
-        return "查看版本历史"
+        return AppLocalization.string("查看版本历史")
     }
 
     var releaseNotesActionSubtitle: String {
-        "使用独立弹窗查看 Markdown 更新日志"
+        AppLocalization.string("使用独立弹窗查看 Markdown 更新日志")
     }
 
     private var automaticUpdateChecksEnabled: Bool {

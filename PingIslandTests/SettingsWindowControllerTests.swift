@@ -1,10 +1,36 @@
 import AppKit
 import Carbon.HIToolbox
+import SwiftUI
 import XCTest
 @testable import Ping_Island
 
 @MainActor
 final class SettingsWindowControllerTests: XCTestCase {
+    func testLocalizationCatalogsContainMatchingKeys() throws {
+        let english = try localizationDictionary(named: "en")
+        let zhHans = try localizationDictionary(named: "zh-Hans")
+
+        XCTAssertEqual(Set(english.keys), Set(zhHans.keys))
+    }
+
+    func testSettingsOptionsAndMascotCopyHaveEnglishTranslations() throws {
+        let english = try localizationDictionary(named: "en")
+        let keys = SettingsCategory.allCases.flatMap { [$0.title, $0.subtitle] }
+            + UsageValueMode.allCases.map(\.title)
+            + AutoRoutePromptsIdleDelay.allCases.map(\.title)
+            + FloatingPetSizeMode.allCases.flatMap { [$0.title, $0.subtitle] }
+            + SubagentVisibilityMode.allCases.flatMap { [$0.title, $0.subtitle] }
+            + NotchPetStyle.allCases.flatMap { [$0.title, $0.subtitle] }
+            + MascotClient.allCases.flatMap { [$0.title, $0.subtitle] }
+            + MascotKind.allCases.flatMap { [$0.title, $0.subtitle] }
+            + MascotStatus.allCases.map(\.displayName)
+
+        for key in Set(keys).filter(containsHanCharacter) {
+            let translation = try XCTUnwrap(english[key], "Missing English translation for \(key)")
+            XCTAssertNotEqual(translation, key, "Untranslated English value for \(key)")
+        }
+    }
+
     func testFloatingPetGuidanceStringsMentionSecondaryClickToReopenSettings() {
         let zhHans = try! localizationFileContents(named: "zh-Hans")
         XCTAssertTrue(
@@ -91,6 +117,16 @@ final class SettingsWindowControllerTests: XCTestCase {
         XCTAssertFalse(window.isMiniaturized)
 
         controller.dismiss()
+    }
+
+    func testSettingsWindowUsesAppLocaleRootView() throws {
+        let controller = SettingsWindowController.shared
+        let window = try XCTUnwrap(controller.window)
+
+        XCTAssertTrue(
+            window.contentViewController
+                is NSHostingController<AppLocalizedRootView<SettingsWindowView>>
+        )
     }
 
     func testResetToDefaultContentSizeRestoresResizedSettingsWindow() throws {
@@ -182,5 +218,19 @@ final class SettingsWindowControllerTests: XCTestCase {
             .appendingPathComponent("\(localeCode).lproj")
             .appendingPathComponent("Localizable.strings")
         return try String(contentsOf: fileURL, encoding: .utf8)
+    }
+
+    private func localizationDictionary(named localeCode: String) throws -> [String: String] {
+        let contents = try localizationFileContents(named: localeCode)
+        let data = try XCTUnwrap(contents.data(using: .utf8))
+        return try XCTUnwrap(
+            PropertyListSerialization.propertyList(from: data, format: nil) as? [String: String]
+        )
+    }
+
+    private func containsHanCharacter(_ value: String) -> Bool {
+        value.unicodeScalars.contains { scalar in
+            (0x4E00...0x9FFF).contains(scalar.value)
+        }
     }
 }
