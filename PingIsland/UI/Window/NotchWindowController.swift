@@ -10,6 +10,12 @@ import Combine
 import SwiftUI
 
 class NotchWindowController: NSWindowController {
+    enum WindowOrderAction: Equatable {
+        case none
+        case orderFront
+        case restoreOnActiveSpace
+    }
+
     let viewModel: NotchViewModel
     private let fullWindowFrame: NSRect
     private var cancellables = Set<AnyCancellable>()
@@ -137,6 +143,19 @@ class NotchWindowController: NSWindowController {
             }
             .store(in: &cancellables)
 
+        NSWorkspace.shared.notificationCenter
+            .publisher(for: NSWorkspace.activeSpaceDidChangeNotification)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self, weak notchWindow, weak viewModel] _ in
+                guard let self, let notchWindow, let viewModel else { return }
+                self.updateWindowPresentation(
+                    window: notchWindow,
+                    viewModel: viewModel,
+                    recoverAfterSpaceChange: true
+                )
+            }
+            .store(in: &cancellables)
+
         // Start with ignoring mouse events (closed state)
         notchWindow.ignoresMouseEvents = true
         updateWindowPresentation(window: notchWindow, viewModel: viewModel)
@@ -153,7 +172,11 @@ class NotchWindowController: NSWindowController {
         fatalError("init(coder:) has not been implemented")
     }
 
-    private func updateWindowPresentation(window: NotchPanel, viewModel: NotchViewModel) {
+    private func updateWindowPresentation(
+        window: NotchPanel,
+        viewModel: NotchViewModel,
+        recoverAfterSpaceChange: Bool = false
+    ) {
         let shouldHideWindow = viewModel.shouldHideWindowPresentation
 
         if shouldHideWindow {
@@ -168,8 +191,21 @@ class NotchWindowController: NSWindowController {
             window.setFrame(fullWindowFrame, display: true)
         }
 
-        if !window.isVisible {
+        switch Self.windowOrderAction(
+            isVisible: window.isVisible,
+            isOnActiveSpace: window.isOnActiveSpace,
+            recoverAfterSpaceChange: recoverAfterSpaceChange
+        ) {
+        case .none:
+            break
+        case .orderFront:
             window.orderFront(nil)
+        case .restoreOnActiveSpace:
+            // Clear stale visible ordering before restoring the all-Spaces panel.
+            if window.isVisible {
+                window.orderOut(nil)
+            }
+            window.orderFrontRegardless()
         }
 
         switch viewModel.status {
@@ -182,5 +218,16 @@ class NotchWindowController: NSWindowController {
         case .closed, .popping:
             window.ignoresMouseEvents = true
         }
+    }
+
+    static func windowOrderAction(
+        isVisible: Bool,
+        isOnActiveSpace: Bool,
+        recoverAfterSpaceChange: Bool
+    ) -> WindowOrderAction {
+        if recoverAfterSpaceChange && !isOnActiveSpace {
+            return .restoreOnActiveSpace
+        }
+        return isVisible ? .none : .orderFront
     }
 }
