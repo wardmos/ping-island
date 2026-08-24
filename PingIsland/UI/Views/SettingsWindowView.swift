@@ -882,7 +882,18 @@ private final class AgentUsageAnalyticsViewModel: ObservableObject {
         let range = selectedRange
         isRefreshing = true
         refreshTask = Task { [weak self] in
-            let nextSnapshot = await AgentUsageStore.shared.snapshot(range: range)
+            let storedSnapshot = await AgentUsageStore.shared.snapshot(range: range)
+            let highlightedSessionIDs = Set(
+                storedSnapshot.recentTodaySessions.map(\.sessionID)
+                    + [storedSnapshot.topSessionThisWeek?.sessionID].compactMap { $0 }
+            )
+            var liveSessionTitles: [String: String] = [:]
+            for sessionID in highlightedSessionIDs {
+                if let session = await SessionStore.shared.session(for: sessionID) {
+                    liveSessionTitles[sessionID] = session.displayTitle
+                }
+            }
+            let nextSnapshot = storedSnapshot.applyingSessionTitles(liveSessionTitles)
             guard !Task.isCancelled else { return }
             await MainActor.run {
                 self?.snapshot = nextSnapshot

@@ -190,6 +190,20 @@ final class AgentUsageAnalyticsTests: XCTestCase {
         XCTAssertEqual(snapshot.recentTodayTokenTotals.resolvedTotal, 550)
         XCTAssertEqual(snapshot.topSessionThisWeek?.sessionID, "recent-1")
         XCTAssertEqual(snapshot.topSessionThisWeek?.tokenTotals.resolvedTotal, 700)
+
+        let titledSnapshot = snapshot.applyingSessionTitles([
+            "recent-1": "Current session title",
+            "recent-2": "Updated recent title",
+        ])
+        XCTAssertEqual(
+            titledSnapshot.recentTodaySessions.first { $0.sessionID == "recent-1" }?.title,
+            "Current session title"
+        )
+        XCTAssertEqual(
+            titledSnapshot.recentTodaySessions.first { $0.sessionID == "recent-2" }?.title,
+            "Updated recent title"
+        )
+        XCTAssertEqual(titledSnapshot.topSessionThisWeek?.title, "Current session title")
     }
 
     func testDailyBucketDecodesLegacyDocumentWithoutSessionRecords() throws {
@@ -284,13 +298,26 @@ final class AgentUsageAnalyticsTests: XCTestCase {
             tokenUsage: CodexTokenUsage(inputTokens: 175, outputTokens: 80, totalTokens: 255),
             windows: []
         ))
+        await store.recordCodexUsageSnapshot(
+            CodexUsageSnapshot(
+                sourceFilePath: sourcePath,
+                capturedAt: capturedAt,
+                planType: "pro",
+                limitID: "codex",
+                tokenUsage: CodexTokenUsage(inputTokens: 175, outputTokens: 80, totalTokens: 255),
+                windows: []
+            ),
+            sessionTitle: "Display token usage by session title"
+        )
 
         let snapshot = await store.snapshot(range: .today, now: capturedAt)
 
         XCTAssertEqual(snapshot.tokenTotals, AgentUsageTokenTotals(input: 75, output: 30, total: 105))
         XCTAssertEqual(snapshot.sessionCount, 1)
         XCTAssertEqual(snapshot.recentTodaySessions.map(\.sessionID), ["019db9a7-336a-7b62-9288-7304c3d2d4b9"])
+        XCTAssertEqual(snapshot.recentTodaySessions.first?.title, "Display token usage by session title")
         XCTAssertEqual(snapshot.recentTodayTokenTotals, AgentUsageTokenTotals(input: 75, output: 30, total: 105))
         XCTAssertEqual(snapshot.topSessionThisWeek?.tokenTotals, AgentUsageTokenTotals(input: 75, output: 30, total: 105))
+        XCTAssertEqual(snapshot.topSessionThisWeek?.title, "Display token usage by session title")
     }
 }
