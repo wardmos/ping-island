@@ -404,23 +404,19 @@ final class AppSettingsStore: ObservableObject {
         static let soundEnabled = "soundEnabled"
         static let soundVolume = "soundVolume"
         static let temporarilyMuteNotificationsUntil = "temporarilyMuteNotificationsUntil"
-        static let processingStartSound = "processingStartSound"
         static let attentionRequiredSound = "attentionRequiredSound"
         static let taskCompletedSound = "taskCompletedSound"
         static let taskErrorSound = "taskErrorSound"
         static let resourceLimitSound = "resourceLimitSound"
-        static let processingStartSoundEnabled = "processingStartSoundEnabled"
         static let attentionRequiredSoundEnabled = "attentionRequiredSoundEnabled"
         static let taskCompletedSoundEnabled = "taskCompletedSoundEnabled"
         static let taskErrorSoundEnabled = "taskErrorSoundEnabled"
         static let resourceLimitSoundEnabled = "resourceLimitSoundEnabled"
-        static let island8BitProcessingStartSound = "island8BitProcessingStartSound"
         static let island8BitAttentionRequiredSound = "island8BitAttentionRequiredSound"
         static let island8BitTaskCompletedSound = "island8BitTaskCompletedSound"
         static let island8BitTaskErrorSound = "island8BitTaskErrorSound"
         static let island8BitResourceLimitSound = "island8BitResourceLimitSound"
         static let soundThemeMode = "soundThemeMode"
-        static let island8BitStartSoundMigrated = "island8BitStartSoundMigrated"
         static let selectedSoundPackPath = "selectedSoundPackPath"
         static let hideInFullscreen = "hideInFullscreen"
         static let autoHideWhenIdle = "autoHideWhenIdle"
@@ -516,13 +512,6 @@ final class AppSettingsStore: ObservableObject {
         }
     }
 
-    @Published var processingStartSound: NotificationSound {
-        didSet {
-            guard !isBootstrapping else { return }
-            defaults.set(processingStartSound.rawValue, forKey: Keys.processingStartSound)
-        }
-    }
-
     @Published var attentionRequiredSound: NotificationSound {
         didSet {
             guard !isBootstrapping else { return }
@@ -551,17 +540,6 @@ final class AppSettingsStore: ObservableObject {
         didSet {
             guard !isBootstrapping else { return }
             defaults.set(resourceLimitSound.rawValue, forKey: Keys.resourceLimitSound)
-        }
-    }
-
-    @Published var processingStartSoundEnabled: Bool {
-        didSet {
-            guard !isBootstrapping else { return }
-            defaults.set(processingStartSoundEnabled, forKey: Keys.processingStartSoundEnabled)
-            recordTelemetrySettingChange(
-                key: Keys.processingStartSoundEnabled,
-                value: processingStartSoundEnabled.description
-            )
         }
     }
 
@@ -606,13 +584,6 @@ final class AppSettingsStore: ObservableObject {
         }
     }
 
-    @Published var island8BitProcessingStartSound: Island8BitSound {
-        didSet {
-            guard !isBootstrapping else { return }
-            defaults.set(island8BitProcessingStartSound.rawValue, forKey: Keys.island8BitProcessingStartSound)
-        }
-    }
-
     @Published var island8BitAttentionRequiredSound: Island8BitSound {
         didSet {
             guard !isBootstrapping else { return }
@@ -645,7 +616,6 @@ final class AppSettingsStore: ObservableObject {
         didSet {
             guard !isBootstrapping else { return }
             defaults.set(soundThemeMode.rawValue, forKey: Keys.soundThemeMode)
-            applyIsland8BitStartSoundMigrationIfNeeded(for: soundThemeMode)
         }
     }
 
@@ -1279,18 +1249,6 @@ final class AppSettingsStore: ObservableObject {
         min(max(width, minimumNotchModuleWidth), maximumNotchModuleWidth)
     }
 
-    private func applyIsland8BitStartSoundMigrationIfNeeded(for mode: SoundThemeMode) {
-        guard mode == .island8Bit else { return }
-        guard !containsPersistedValue(forKey: Keys.island8BitStartSoundMigrated) else { return }
-
-        if containsPersistedValue(forKey: Keys.processingStartSoundEnabled),
-           processingStartSoundEnabled == false {
-            processingStartSoundEnabled = true
-        }
-
-        defaults.set(true, forKey: Keys.island8BitStartSoundMigrated)
-    }
-
     init(
         defaults: UserDefaults = .standard,
         bridgeRuntimeConfigWriter: @escaping (BridgeRuntimeConfigSnapshot) -> Void = {
@@ -1358,9 +1316,6 @@ final class AppSettingsStore: ObservableObject {
             default: 0.9
         ))
         _temporarilyMuteNotificationsUntil = Published(initialValue: activeTemporaryMute)
-        _processingStartSound = Published(initialValue: NotificationSound(
-            rawValue: defaults.string(forKey: Keys.processingStartSound) ?? ""
-        ) ?? .tink)
         _attentionRequiredSound = Published(initialValue: NotificationSound(
             rawValue: defaults.string(forKey: Keys.attentionRequiredSound) ?? ""
         ) ?? .glass)
@@ -1373,12 +1328,6 @@ final class AppSettingsStore: ObservableObject {
         _resourceLimitSound = Published(initialValue: NotificationSound(
             rawValue: defaults.string(forKey: Keys.resourceLimitSound) ?? ""
         ) ?? .morse)
-        _processingStartSoundEnabled = Published(initialValue: Self.boolValue(
-            from: defaults,
-            key: Keys.processingStartSoundEnabled,
-            exists: persistedKeys.contains(Keys.processingStartSoundEnabled),
-            default: true
-        ))
         _attentionRequiredSoundEnabled = Published(initialValue: Self.boolValue(
             from: defaults,
             key: Keys.attentionRequiredSoundEnabled,
@@ -1403,9 +1352,6 @@ final class AppSettingsStore: ObservableObject {
             exists: persistedKeys.contains(Keys.resourceLimitSoundEnabled),
             default: true
         ))
-        _island8BitProcessingStartSound = Published(initialValue: Island8BitSound(
-            rawValue: defaults.string(forKey: Keys.island8BitProcessingStartSound) ?? ""
-        ) ?? .menuSelect)
         _island8BitAttentionRequiredSound = Published(initialValue: Island8BitSound(
             rawValue: defaults.string(forKey: Keys.island8BitAttentionRequiredSound) ?? ""
         ) ?? .approvalAlert)
@@ -1600,11 +1546,6 @@ final class AppSettingsStore: ObservableObject {
         if activeTemporaryMute == nil {
             defaults.removeObject(forKey: Keys.temporarilyMuteNotificationsUntil)
         }
-        if !persistedKeys.contains(Keys.processingStartSoundEnabled) {
-            defaults.set(true, forKey: Keys.processingStartSoundEnabled)
-        }
-        applyIsland8BitStartSoundMigrationIfNeeded(for: resolvedSoundThemeMode)
-
         isBootstrapping = false
 
         writeEffectiveBridgeRuntimeConfig()
@@ -1843,8 +1784,6 @@ enum AppSettings {
 
     static func isSoundEnabled(for event: NotificationEvent) -> Bool {
         switch event {
-        case .processingStarted:
-            return shared.processingStartSoundEnabled
         case .attentionRequired:
             return shared.attentionRequiredSoundEnabled
         case .taskCompleted:
@@ -1858,8 +1797,6 @@ enum AppSettings {
 
     static func setSoundEnabled(_ enabled: Bool, for event: NotificationEvent) {
         switch event {
-        case .processingStarted:
-            shared.processingStartSoundEnabled = enabled
         case .attentionRequired:
             shared.attentionRequiredSoundEnabled = enabled
         case .taskCompleted:
@@ -1873,8 +1810,6 @@ enum AppSettings {
 
     static func sound(for event: NotificationEvent) -> NotificationSound {
         switch event {
-        case .processingStarted:
-            return shared.processingStartSound
         case .attentionRequired:
             return shared.attentionRequiredSound
         case .taskCompleted:
@@ -1888,8 +1823,6 @@ enum AppSettings {
 
     static func setSound(_ sound: NotificationSound, for event: NotificationEvent) {
         switch event {
-        case .processingStarted:
-            shared.processingStartSound = sound
         case .attentionRequired:
             shared.attentionRequiredSound = sound
         case .taskCompleted:
@@ -1903,8 +1836,6 @@ enum AppSettings {
 
     static func bundledSound(for event: NotificationEvent) -> Island8BitSound {
         switch event {
-        case .processingStarted:
-            return shared.island8BitProcessingStartSound
         case .attentionRequired:
             return shared.island8BitAttentionRequiredSound
         case .taskCompleted:
@@ -1918,8 +1849,6 @@ enum AppSettings {
 
     static func setBundledSound(_ sound: Island8BitSound, for event: NotificationEvent) {
         switch event {
-        case .processingStarted:
-            shared.island8BitProcessingStartSound = sound
         case .attentionRequired:
             shared.island8BitAttentionRequiredSound = sound
         case .taskCompleted:

@@ -3,7 +3,6 @@ import Combine
 import Foundation
 
 enum NotificationEvent: String, CaseIterable, Identifiable {
-    case processingStarted
     case attentionRequired
     case taskCompleted
     case taskError
@@ -13,8 +12,6 @@ enum NotificationEvent: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .processingStarted:
-            return "开始处理"
         case .attentionRequired:
             return "需要介入"
         case .taskCompleted:
@@ -28,8 +25,6 @@ enum NotificationEvent: String, CaseIterable, Identifiable {
 
     var subtitle: String {
         switch self {
-        case .processingStarted:
-            return "会话开始处理、运行工具或进入阶段切换。"
         case .attentionRequired:
             return "等待审批、回答问题或其他需要你接手的时刻。"
         case .taskCompleted:
@@ -43,8 +38,6 @@ enum NotificationEvent: String, CaseIterable, Identifiable {
 
     var defaultSound: NotificationSound {
         switch self {
-        case .processingStarted:
-            return .tink
         case .attentionRequired:
             return .glass
         case .taskCompleted:
@@ -58,8 +51,6 @@ enum NotificationEvent: String, CaseIterable, Identifiable {
 
     var cespCategories: [String] {
         switch self {
-        case .processingStarted:
-            return ["task.acknowledge", "session.start"]
         case .attentionRequired:
             return ["input.required"]
         case .taskCompleted:
