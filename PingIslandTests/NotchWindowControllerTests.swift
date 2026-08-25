@@ -17,47 +17,83 @@ final class NotchWindowControllerTests: XCTestCase {
         XCTAssertFalse(panel.collectionBehavior.contains(.moveToActiveSpace))
     }
 
-    func testActiveSpaceChangeReordersWindowOutsideActiveSpace() {
-        XCTAssertEqual(
-            NotchWindowController.windowOrderAction(
-                isVisible: true,
-                isOnActiveSpace: false,
-                recoverAfterSpaceChange: true
-            ),
-            .restoreOnActiveSpace
+    func testActiveSpaceChangePlansRestoreWithoutActivation() {
+        let plan = NotchWindowController.windowPresentationPlan(
+            status: .opened,
+            openReason: .click,
+            isVisible: true,
+            isOnActiveSpace: false,
+            updateSource: .activeSpaceChange
         )
+
+        XCTAssertEqual(plan.orderAction, .restoreOnActiveSpace)
+        XCTAssertFalse(plan.ignoresMouseEvents)
+        XCTAssertFalse(plan.shouldActivateApplication)
     }
 
-    func testActiveSpaceChangeDoesNotReorderWindowAlreadyOnActiveSpace() {
-        XCTAssertEqual(
-            NotchWindowController.windowOrderAction(
-                isVisible: true,
-                isOnActiveSpace: true,
-                recoverAfterSpaceChange: true
-            ),
-            .none
+    func testActiveSpaceChangePlansNoActionWhenWindowIsAlreadyOnActiveSpace() {
+        let plan = NotchWindowController.windowPresentationPlan(
+            status: .opened,
+            openReason: .click,
+            isVisible: true,
+            isOnActiveSpace: true,
+            updateSource: .activeSpaceChange
         )
+
+        XCTAssertEqual(plan.orderAction, .none)
+        XCTAssertFalse(plan.shouldActivateApplication)
     }
 
-    func testHiddenWindowUsesNormalFrontOrderingWithoutSpaceChange() {
-        XCTAssertEqual(
-            NotchWindowController.windowOrderAction(
-                isVisible: false,
-                isOnActiveSpace: true,
-                recoverAfterSpaceChange: false
-            ),
-            .orderFront
+    func testStateChangePlansNormalFrontOrderingForHiddenWindow() {
+        let plan = NotchWindowController.windowPresentationPlan(
+            status: .closed,
+            openReason: .unknown,
+            isVisible: false,
+            isOnActiveSpace: true,
+            updateSource: .stateChange
         )
+
+        XCTAssertEqual(plan.orderAction, .orderFront)
+        XCTAssertTrue(plan.ignoresMouseEvents)
+        XCTAssertFalse(plan.shouldActivateApplication)
     }
 
-    func testVisibleWindowIsNotReorderedWithoutSpaceChange() {
-        XCTAssertEqual(
-            NotchWindowController.windowOrderAction(
-                isVisible: true,
-                isOnActiveSpace: false,
-                recoverAfterSpaceChange: false
-            ),
-            .none
+    func testStateChangePlansNoOrderingForVisibleWindow() {
+        let plan = NotchWindowController.windowPresentationPlan(
+            status: .closed,
+            openReason: .unknown,
+            isVisible: true,
+            isOnActiveSpace: false,
+            updateSource: .stateChange
         )
+
+        XCTAssertEqual(plan.orderAction, .none)
+        XCTAssertFalse(plan.shouldActivateApplication)
+    }
+
+    func testNormalOpenedClickUpdateActivatesApplication() {
+        let plan = NotchWindowController.windowPresentationPlan(
+            status: .opened,
+            openReason: .click,
+            isVisible: true,
+            isOnActiveSpace: true,
+            updateSource: .stateChange
+        )
+
+        XCTAssertFalse(plan.ignoresMouseEvents)
+        XCTAssertTrue(plan.shouldActivateApplication)
+    }
+
+    func testNormalNotificationUpdateDoesNotActivateApplication() {
+        let plan = NotchWindowController.windowPresentationPlan(
+            status: .opened,
+            openReason: .notification,
+            isVisible: true,
+            isOnActiveSpace: true,
+            updateSource: .stateChange
+        )
+
+        XCTAssertFalse(plan.ignoresMouseEvents)
+        XCTAssertFalse(plan.shouldActivateApplication)
     }
 }
