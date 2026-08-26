@@ -76,16 +76,10 @@ final class SoundThemeConfigurationTests: XCTestCase {
 
         // The init path on the live AppSettings reads UserDefaults.standard, so
         // we verify the documented mapping by inspecting the static defaults table.
+        XCTAssertEqual(AppSettings.bundledSound(for: .processingStarted), AppSettings.shared.island8BitProcessingStartSound)
         XCTAssertEqual(AppSettings.bundledSound(for: .attentionRequired), AppSettings.shared.island8BitAttentionRequiredSound)
         XCTAssertEqual(AppSettings.bundledSound(for: .taskCompleted), AppSettings.shared.island8BitTaskCompletedSound)
         XCTAssertEqual(AppSettings.bundledSound(for: .taskError), AppSettings.shared.island8BitTaskErrorSound)
         XCTAssertEqual(AppSettings.bundledSound(for: .resourceLimit), AppSettings.shared.island8BitResourceLimitSound)
-    }
-
-    func testNotificationEventsOnlyIncludeActionableOutcomes() {
-        XCTAssertEqual(
-            NotificationEvent.allCases.map(\.rawValue),
-            ["attentionRequired", "taskCompleted", "taskError", "resourceLimit"]
-        )
     }
 }

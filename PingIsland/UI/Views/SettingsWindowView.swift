@@ -811,6 +811,8 @@ private struct SoundSettingsContent: View {
 
     private func soundEnabledBinding(for event: NotificationEvent) -> Binding<Bool> {
         switch event {
+        case .processingStarted:
+            return $settings.processingStartSoundEnabled
         case .attentionRequired:
             return $settings.attentionRequiredSoundEnabled
         case .taskCompleted:
@@ -824,6 +826,8 @@ private struct SoundSettingsContent: View {
 
     private func soundBinding(for event: NotificationEvent) -> Binding<NotificationSound> {
         switch event {
+        case .processingStarted:
+            return $settings.processingStartSound
         case .attentionRequired:
             return $settings.attentionRequiredSound
         case .taskCompleted:
@@ -837,6 +841,8 @@ private struct SoundSettingsContent: View {
 
     private func bundledSoundBinding(for event: NotificationEvent) -> Binding<Island8BitSound> {
         switch event {
+        case .processingStarted:
+            return $settings.island8BitProcessingStartSound
         case .attentionRequired:
             return $settings.island8BitAttentionRequiredSound
         case .taskCompleted:

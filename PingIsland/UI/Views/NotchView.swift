@@ -47,6 +47,7 @@ struct NotchView: View {
     @State private var isHovering: Bool = false
     @State private var isBouncing: Bool = false
     @State private var hasPrimedSoundTransitions: Bool = false
+    @State private var previousProcessingIds: Set<String> = []
     @State private var previousAttentionSoundIds: Set<String> = []
     @State private var previousCompletionSoundIds: Set<String> = []
     @State private var previousTaskErrorIds: Set<String> = []
@@ -1450,6 +1451,11 @@ struct NotchView: View {
 
     private func handleSessionSoundTransitions(_ instances: [SessionState]) {
         if !hasPrimedSoundTransitions {
+            previousProcessingIds = Set(
+                instances
+                    .filter(\.phase.contributesToProcessingSoundEdge)
+                    .map(\.stableId)
+            )
             previousAttentionSoundIds = Set(
                 instances
                     .filter(SessionAttentionSoundEvaluator.shouldContributeToAttentionSoundEdge)
@@ -1474,6 +1480,7 @@ struct NotchView: View {
             return
         }
 
+        let processingSessions = instances.filter(\.phase.contributesToProcessingSoundEdge)
         let attentionSessions = instances.filter(
             SessionAttentionSoundEvaluator.shouldContributeToAttentionSoundEdge
         )
@@ -1482,6 +1489,7 @@ struct NotchView: View {
             $0.phase == .compacting
         }
 
+        let newProcessingIds = Set(processingSessions.map(\.stableId))
         let newAttentionIds = Set(attentionSessions.map(\.stableId))
         let newCompletedIds = Set(completedSessions.map(\.stableId))
         let newTaskErrorIds = Set(
@@ -1512,8 +1520,11 @@ struct NotchView: View {
             playEventSoundIfNeeded(.attentionRequired, sessions: attentionSessions)
         } else if isNewCompletion {
             playEventSoundIfNeeded(.taskCompleted, sessions: newlyCompletedSessions)
+        } else if !newProcessingIds.subtracting(previousProcessingIds).isEmpty {
+            playEventSoundIfNeeded(.processingStarted, sessions: processingSessions)
         }
 
+        previousProcessingIds = newProcessingIds
         previousAttentionSoundIds = newAttentionIds
         previousCompletionSoundIds = newCompletedIds
         previousTaskErrorIds = newTaskErrorIds

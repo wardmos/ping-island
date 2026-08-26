@@ -184,6 +184,7 @@ final class DetachedIslandWindowController: NSWindowController, NSWindowDelegate
     private var isPetInNotchZone = false
     private var isPetSecondaryClickArmed = false
     private var hasPrimedSoundTransitions = false
+    private var previousProcessingIds = Set<String>()
     private var previousAttentionSoundIds = Set<String>()
     private var previousCompletionSoundIds = Set<String>()
     private var previousTaskErrorIds = Set<String>()
@@ -1919,6 +1920,11 @@ final class DetachedIslandWindowController: NSWindowController, NSWindowDelegate
     }
 
     private func primeSoundTransitions(_ instances: [SessionState]) {
+        previousProcessingIds = Set(
+            instances
+                .filter(\.phase.contributesToProcessingSoundEdge)
+                .map(\.stableId)
+        )
         previousAttentionSoundIds = Set(
             instances
                 .filter(SessionAttentionSoundEvaluator.shouldContributeToAttentionSoundEdge)
@@ -1948,6 +1954,7 @@ final class DetachedIslandWindowController: NSWindowController, NSWindowDelegate
             return
         }
 
+        let processingSessions = instances.filter(\.phase.contributesToProcessingSoundEdge)
         let attentionSessions = instances.filter(
             SessionAttentionSoundEvaluator.shouldContributeToAttentionSoundEdge
         )
@@ -1956,6 +1963,7 @@ final class DetachedIslandWindowController: NSWindowController, NSWindowDelegate
             $0.phase == .compacting
         }
 
+        let newProcessingIds = Set(processingSessions.map(\.stableId))
         let newAttentionIds = Set(attentionSessions.map(\.stableId))
         let newCompletedIds = Set(completedSessions.map(\.stableId))
         let newTaskErrorIds = Set(
@@ -1986,8 +1994,11 @@ final class DetachedIslandWindowController: NSWindowController, NSWindowDelegate
             playEventSoundIfNeeded(.attentionRequired, sessions: attentionSessions)
         } else if isNewCompletion {
             playEventSoundIfNeeded(.taskCompleted, sessions: newlyCompletedSessions)
+        } else if !newProcessingIds.subtracting(previousProcessingIds).isEmpty {
+            playEventSoundIfNeeded(.processingStarted, sessions: processingSessions)
         }
 
+        previousProcessingIds = newProcessingIds
         previousAttentionSoundIds = newAttentionIds
         previousCompletionSoundIds = newCompletedIds
         previousTaskErrorIds = newTaskErrorIds
