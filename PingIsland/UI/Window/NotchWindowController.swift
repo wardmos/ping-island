@@ -146,30 +146,6 @@ class NotchWindowController: NSWindowController {
             }
             .store(in: &cancellables)
 
-        viewModel.$isFullscreenBrowserHiddenActive
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self, weak notchWindow, weak viewModel] _ in
-                guard let self, let notchWindow, let viewModel else { return }
-                self.updateWindowPresentation(
-                    window: notchWindow,
-                    viewModel: viewModel,
-                    updateSource: .environmentChange
-                )
-            }
-            .store(in: &cancellables)
-
-        viewModel.$isIdleAutoHiddenActive
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self, weak notchWindow, weak viewModel] _ in
-                guard let self, let notchWindow, let viewModel else { return }
-                self.updateWindowPresentation(
-                    window: notchWindow,
-                    viewModel: viewModel,
-                    updateSource: .environmentChange
-                )
-            }
-            .store(in: &cancellables)
-
         EnergyGovernor.shared.$mode
             .receive(on: DispatchQueue.main)
             .sink { [weak self, weak notchWindow, weak viewModel] mode in
