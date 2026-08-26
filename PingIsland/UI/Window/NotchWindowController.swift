@@ -78,7 +78,11 @@ class NotchWindowController: NSWindowController {
             .receive(on: DispatchQueue.main)
             .sink { [weak self, weak notchWindow, weak viewModel] _ in
                 guard let self, let notchWindow, let viewModel else { return }
-                self.updateWindowPresentation(window: notchWindow, viewModel: viewModel)
+                self.updateWindowPresentation(
+                    window: notchWindow,
+                    viewModel: viewModel,
+                    updateSource: .stateChange
+                )
             }
             .store(in: &cancellables)
 
@@ -86,7 +90,11 @@ class NotchWindowController: NSWindowController {
             .receive(on: DispatchQueue.main)
             .sink { [weak self, weak notchWindow, weak viewModel] _ in
                 guard let self, let notchWindow, let viewModel else { return }
-                self.updateWindowPresentation(window: notchWindow, viewModel: viewModel)
+                self.updateWindowPresentation(
+                    window: notchWindow,
+                    viewModel: viewModel,
+                    updateSource: .stateChange
+                )
             }
             .store(in: &cancellables)
 
@@ -142,7 +150,11 @@ class NotchWindowController: NSWindowController {
             .receive(on: DispatchQueue.main)
             .sink { [weak self, weak notchWindow, weak viewModel] _ in
                 guard let self, let notchWindow, let viewModel else { return }
-                self.updateWindowPresentation(window: notchWindow, viewModel: viewModel)
+                self.updateWindowPresentation(
+                    window: notchWindow,
+                    viewModel: viewModel,
+                    updateSource: .stateChange
+                )
             }
             .store(in: &cancellables)
 
@@ -174,7 +186,11 @@ class NotchWindowController: NSWindowController {
 
         // Start with ignoring mouse events (closed state)
         notchWindow.ignoresMouseEvents = true
-        updateWindowPresentation(window: notchWindow, viewModel: viewModel)
+        updateWindowPresentation(
+            window: notchWindow,
+            viewModel: viewModel,
+            updateSource: .stateChange
+        )
 
         // Perform boot animation after a brief delay
         if performBootAnimation {
@@ -191,7 +207,7 @@ class NotchWindowController: NSWindowController {
     private func updateWindowPresentation(
         window: NotchPanel,
         viewModel: NotchViewModel,
-        updateSource: WindowPresentationUpdateSource = .stateChange
+        updateSource: WindowPresentationUpdateSource
     ) {
         let shouldHideWindow = viewModel.shouldHideWindowPresentation
 
