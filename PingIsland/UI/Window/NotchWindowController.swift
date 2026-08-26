@@ -18,6 +18,7 @@ class NotchWindowController: NSWindowController {
 
     enum WindowPresentationUpdateSource: Equatable {
         case stateChange
+        case environmentChange
         case activeSpaceChange
     }
 
@@ -93,7 +94,11 @@ class NotchWindowController: NSWindowController {
             .receive(on: DispatchQueue.main)
             .sink { [weak self, weak notchWindow, weak viewModel] _ in
                 guard let self, let notchWindow, let viewModel else { return }
-                self.updateWindowPresentation(window: notchWindow, viewModel: viewModel)
+                self.updateWindowPresentation(
+                    window: notchWindow,
+                    viewModel: viewModel,
+                    updateSource: .environmentChange
+                )
             }
             .store(in: &cancellables)
 
@@ -101,7 +106,11 @@ class NotchWindowController: NSWindowController {
             .receive(on: DispatchQueue.main)
             .sink { [weak self, weak notchWindow, weak viewModel] _ in
                 guard let self, let notchWindow, let viewModel else { return }
-                self.updateWindowPresentation(window: notchWindow, viewModel: viewModel)
+                self.updateWindowPresentation(
+                    window: notchWindow,
+                    viewModel: viewModel,
+                    updateSource: .environmentChange
+                )
             }
             .store(in: &cancellables)
 
@@ -133,7 +142,11 @@ class NotchWindowController: NSWindowController {
             .receive(on: DispatchQueue.main)
             .sink { [weak self, weak notchWindow, weak viewModel] _ in
                 guard let self, let notchWindow, let viewModel else { return }
-                self.updateWindowPresentation(window: notchWindow, viewModel: viewModel)
+                self.updateWindowPresentation(
+                    window: notchWindow,
+                    viewModel: viewModel,
+                    updateSource: .environmentChange
+                )
             }
             .store(in: &cancellables)
 

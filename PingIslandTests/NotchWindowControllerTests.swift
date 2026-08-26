@@ -44,6 +44,20 @@ final class NotchWindowControllerTests: XCTestCase {
         XCTAssertFalse(plan.shouldActivateApplication)
     }
 
+    func testFullscreenEnvironmentChangeDoesNotActivateApplication() {
+        let plan = NotchWindowController.windowPresentationPlan(
+            status: .opened,
+            openReason: .click,
+            isVisible: true,
+            isOnActiveSpace: true,
+            updateSource: .environmentChange
+        )
+
+        XCTAssertEqual(plan.orderAction, .none)
+        XCTAssertFalse(plan.ignoresMouseEvents)
+        XCTAssertFalse(plan.shouldActivateApplication)
+    }
+
     func testStateChangePlansNormalFrontOrderingForHiddenWindow() {
         let plan = NotchWindowController.windowPresentationPlan(
             status: .closed,
