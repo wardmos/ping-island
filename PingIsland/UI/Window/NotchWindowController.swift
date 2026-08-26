@@ -118,7 +118,11 @@ class NotchWindowController: NSWindowController {
             .receive(on: DispatchQueue.main)
             .sink { [weak self, weak notchWindow, weak viewModel] _ in
                 guard let self, let notchWindow, let viewModel else { return }
-                self.updateWindowPresentation(window: notchWindow, viewModel: viewModel)
+                self.updateWindowPresentation(
+                    window: notchWindow,
+                    viewModel: viewModel,
+                    updateSource: .environmentChange
+                )
             }
             .store(in: &cancellables)
 
@@ -126,7 +130,11 @@ class NotchWindowController: NSWindowController {
             .receive(on: DispatchQueue.main)
             .sink { [weak self, weak notchWindow, weak viewModel] _ in
                 guard let self, let notchWindow, let viewModel else { return }
-                self.updateWindowPresentation(window: notchWindow, viewModel: viewModel)
+                self.updateWindowPresentation(
+                    window: notchWindow,
+                    viewModel: viewModel,
+                    updateSource: .environmentChange
+                )
             }
             .store(in: &cancellables)
 
@@ -154,7 +162,11 @@ class NotchWindowController: NSWindowController {
             .receive(on: DispatchQueue.main)
             .sink { [weak self, weak notchWindow, weak viewModel] _ in
                 guard let self, let notchWindow, let viewModel else { return }
-                self.updateWindowPresentation(window: notchWindow, viewModel: viewModel)
+                self.updateWindowPresentation(
+                    window: notchWindow,
+                    viewModel: viewModel,
+                    updateSource: .environmentChange
+                )
             }
             .store(in: &cancellables)
 
@@ -163,7 +175,11 @@ class NotchWindowController: NSWindowController {
             .sink { [weak self, weak notchWindow, weak viewModel] mode in
                 guard let self, let notchWindow, let viewModel else { return }
                 viewModel.updateQuietBackgroundPresentationState(isActive: mode == .quietBackground)
-                self.updateWindowPresentation(window: notchWindow, viewModel: viewModel)
+                self.updateWindowPresentation(
+                    window: notchWindow,
+                    viewModel: viewModel,
+                    updateSource: .environmentChange
+                )
             }
             .store(in: &cancellables)
 
