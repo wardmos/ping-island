@@ -118,6 +118,12 @@ struct AgentUsageSessionRecord: Codable, Equatable, Identifiable, Sendable {
         tokenTotals.add(totals)
     }
 
+    nonisolated mutating func updateTitle(_ title: String?) {
+        if let title = Self.nonEmpty(title) {
+            self.title = title
+        }
+    }
+
     private nonisolated static func nonEmpty(_ value: String?) -> String? {
         let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed?.isEmpty == false ? trimmed : nil
@@ -256,6 +262,33 @@ struct AgentUsageDashboardSnapshot: Equatable, Sendable {
 
     nonisolated var hasActivity: Bool {
         sessionCount > 0 || toolUseCount > 0 || tokenTotals.resolvedTotal > 0
+    }
+
+    nonisolated func applyingSessionTitles(_ titlesBySessionID: [String: String]) -> AgentUsageDashboardSnapshot {
+        var titledRecentSessions = recentTodaySessions
+        for index in titledRecentSessions.indices {
+            titledRecentSessions[index].updateTitle(titlesBySessionID[titledRecentSessions[index].sessionID])
+        }
+
+        var titledTopSession = topSessionThisWeek
+        if let sessionID = titledTopSession?.sessionID {
+            titledTopSession?.updateTitle(titlesBySessionID[sessionID])
+        }
+
+        return AgentUsageDashboardSnapshot(
+            range: range,
+            sessionCount: sessionCount,
+            toolUseCount: toolUseCount,
+            tokenTotals: tokenTotals,
+            topAgents: topAgents,
+            topTools: topTools,
+            heatmapDays: heatmapDays,
+            trendPoints: trendPoints,
+            spendSummary: spendSummary,
+            recentTodaySessions: titledRecentSessions,
+            recentTodayTokenTotals: recentTodayTokenTotals,
+            topSessionThisWeek: titledTopSession
+        )
     }
 
     fileprivate nonisolated static func recentHeatmapDays(
@@ -609,6 +642,18 @@ struct AgentUsageDocument: Codable, Equatable, Sendable {
     nonisolated static func codexTokenSourceKey(_ sourceKey: String) -> String {
         "codex|\(sourceKey)"
     }
+
+    nonisolated mutating func updateSessionTitle(_ title: String?, for sessionID: String) {
+        for day in Array(buckets.keys) {
+            guard var bucket = buckets[day],
+                  var record = bucket.sessionRecords[sessionID] else {
+                continue
+            }
+            record.updateTitle(title)
+            bucket.sessionRecords[sessionID] = record
+            buckets[day] = bucket
+        }
+    }
 }
 
 actor AgentUsageStore {
@@ -732,7 +777,11 @@ actor AgentUsageStore {
         scheduleSave()
     }
 
-    func recordCodexUsageSnapshot(_ snapshot: CodexUsageSnapshot, now: Date = Date()) async {
+    func recordCodexUsageSnapshot(
+        _ snapshot: CodexUsageSnapshot,
+        sessionTitle: String? = nil,
+        now: Date = Date()
+    ) async {
         guard let currentUsage = snapshot.tokenUsage,
               currentUsage.totalTokens > 0 || currentUsage.inputTokens > 0 || currentUsage.outputTokens > 0 else {
             return
@@ -746,6 +795,7 @@ actor AgentUsageStore {
             sourceKey: AgentUsageDocument.codexTokenSourceKey(sourceKey),
             totals: currentUsage.totals,
             capturedAt: snapshot.capturedAt ?? now,
+            sessionTitle: sessionTitle,
             recordInitialSnapshot: false
         )
 
@@ -774,6 +824,10 @@ actor AgentUsageStore {
 
         var document = await loadDocument()
         let previous = document.tokenBaselines[sourceKey]
+        let resolvedSessionID = nonEmpty(sessionID)
+        if let resolvedSessionID {
+            document.updateSessionTitle(sessionTitle, for: resolvedSessionID)
+        }
         let didReset = didTokenSourceReset(
             previous: previous,
             currentFileSize: sourceFileSize
@@ -807,7 +861,7 @@ actor AgentUsageStore {
 
         let day = Self.dayKey(for: capturedAt, calendar: calendar)
         var bucket = document.buckets[day] ?? AgentUsageDailyBucket(day: day)
-        if let sessionID = nonEmpty(sessionID) {
+        if let sessionID = resolvedSessionID {
             bucket.recordSession(
                 agent: agentLabel(provider: provider, clientInfo: clientInfo),
                 sessionID: sessionID,
