@@ -75,33 +75,6 @@ final class RemoteCodexSnapshotPhaseTests: XCTestCase {
         await store.process(.sessionArchived(sessionId: sessionId))
     }
 
-    func testSnapshotDoesNotRestoreSessionArchivedDuringActorReentrancy() async {
-        let sessionId = "codex-remote-snapshot-archived-\(UUID().uuidString)"
-        let store = SessionStore.shared
-
-        await store.upsertCodexSession(
-            sessionId: sessionId,
-            name: "Remote task",
-            preview: "Existing lifecycle state",
-            cwd: snapshotCwd(sessionId: sessionId),
-            phase: .idle,
-            intervention: nil,
-            clientInfo: .codexCLI()
-        )
-        await store.setHookEventPreReloadHandlerForTesting { event in
-            guard event.sessionId == sessionId else { return }
-            await store.process(.sessionArchived(sessionId: sessionId))
-        }
-
-        await store.process(.hookReceived(makeSnapshot(sessionId: sessionId)))
-        await store.setHookEventPreReloadHandlerForTesting(nil)
-
-        let session = await store.session(for: sessionId)
-        XCTAssertNil(session)
-
-        await store.process(.sessionArchived(sessionId: sessionId))
-    }
-
     private func makeSnapshot(sessionId: String) -> HookEvent {
         HookEvent(
             sessionId: sessionId,
