@@ -487,6 +487,11 @@ actor SessionStore {
         // copy (actor reentrancy). Metadata-only snapshots must detect all such
         // mutations because some lifecycle changes do not update lastActivity.
         let latestSession = sessions[sessionId]
+        if isRemoteCodexThreadSnapshot,
+           persistedSessionBeforeAwait != nil,
+           latestSession == nil {
+            return
+        }
         let snapshotStateChangedDuringAwait = isRemoteCodexThreadSnapshot
             && latestSession != persistedSessionBeforeAwait
         if let latest = latestSession,
