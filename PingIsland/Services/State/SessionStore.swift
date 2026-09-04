@@ -92,6 +92,7 @@ actor SessionStore {
     private var pendingHookResponseCancellationHandler: @Sendable (String, SessionIngress) -> Void = {
         SessionStore.cancelPendingHookResponse(toolUseId: $0, ingress: $1)
     }
+    private var hookEventPreReloadHandlerForTesting: (@Sendable (HookEvent) async -> Void)?
 
     /// Periodic sweep that removes sessions whose Claude process has died
     /// without delivering `SessionEnd` (Ctrl-C kill, OOM, terminal closed) and
@@ -227,6 +228,12 @@ actor SessionStore {
         pendingHookResponseCancellationHandler = handler ?? {
             SessionStore.cancelPendingHookResponse(toolUseId: $0, ingress: $1)
         }
+    }
+
+    func setHookEventPreReloadHandlerForTesting(
+        _ handler: (@Sendable (HookEvent) async -> Void)?
+    ) {
+        hookEventPreReloadHandlerForTesting = handler
     }
 
     // MARK: - Hook Event Processing
@@ -394,6 +401,9 @@ actor SessionStore {
         let sessionId = event.provider == .codex
             ? resolveOrAdoptCodexHookSession(event)
             : event.sessionId
+        let isRemoteCodexThreadSnapshot = event.provider == .codex
+            && event.ingress == .remoteBridge
+            && event.event == "RemoteCodexThreadUpdated"
 
         // When Codex fires a PermissionRequest hook with permission_mode=bypassPermissions,
         // Codex has already auto-approved the tool call internally (approval_mode "never").
@@ -470,11 +480,15 @@ actor SessionStore {
             )
         }
 
+        if isRemoteCodexThreadSnapshot, let hookEventPreReloadHandlerForTesting {
+            await hookEventPreReloadHandlerForTesting(event)
+        }
+
         // After the await points another event may have mutated the persisted
-        // copy (actor reentrancy).  Merge the enriched client info into the
-        // latest snapshot so we don't silently discard phase / chatItem changes
-        // made by the concurrent event.
-        if let latest = sessions[sessionId], latest.lastActivity > session.lastActivity {
+        // copy (actor reentrancy). Metadata-only snapshots always reload it
+        // because lifecycle changes may leave lastActivity unchanged.
+        if let latest = sessions[sessionId],
+           isRemoteCodexThreadSnapshot || latest.lastActivity > session.lastActivity {
             session = latest
             // Re-apply enrichment
             session.clientInfo = session.clientInfo.merged(with: event.clientInfo)
@@ -557,9 +571,14 @@ actor SessionStore {
             for: event,
             session: session
         )
-        let newPhase: SessionPhase = shouldPreserveEndedStopForAnsweredQuestion || codeBuddyCLINotificationIntervention != nil
+        let inferredPhase: SessionPhase = shouldPreserveEndedStopForAnsweredQuestion || codeBuddyCLINotificationIntervention != nil
             ? .waitingForInput
             : event.determinePhase()
+        // A fresh snapshot session is already idle. After any actor reentrancy,
+        // keep the reloaded lifecycle state under real hook-event control.
+        let newPhase: SessionPhase = isRemoteCodexThreadSnapshot
+            ? session.phase
+            : inferredPhase
         if wasCompletedReady, newPhase == .processing {
             session.completionSequence &+= 1
         }
