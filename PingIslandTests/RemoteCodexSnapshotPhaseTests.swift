@@ -41,35 +41,29 @@ final class RemoteCodexSnapshotPhaseTests: XCTestCase {
         }
     }
 
-    func testSnapshotDoesNotRestoreApprovalResolvedDuringActorReentrancy() async {
-        let sessionId = "codex-remote-snapshot-approval-\(UUID().uuidString)"
-        let toolUseId = "tool-\(UUID().uuidString)"
+    func testSnapshotDoesNotRestoreInterruptedPhaseDuringActorReentrancy() async {
+        let sessionId = "codex-remote-snapshot-interrupted-\(UUID().uuidString)"
         let store = SessionStore.shared
 
         await store.upsertCodexSession(
             sessionId: sessionId,
             name: "Remote task",
-            preview: "Waiting for approval",
+            preview: "Active turn",
             cwd: snapshotCwd(sessionId: sessionId),
-            phase: .waitingForApproval(PermissionContext(
-                toolUseId: toolUseId,
-                toolName: "Bash",
-                toolInput: nil,
-                receivedAt: Date()
-            )),
+            phase: .processing,
             intervention: nil,
             clientInfo: .codexCLI()
         )
         await store.setHookEventPreReloadHandlerForTesting { event in
             guard event.sessionId == sessionId else { return }
-            await store.process(.permissionApproved(sessionId: sessionId, toolUseId: toolUseId))
+            await store.process(.interruptDetected(sessionId: sessionId))
         }
 
         await store.process(.hookReceived(makeSnapshot(sessionId: sessionId)))
         await store.setHookEventPreReloadHandlerForTesting(nil)
 
         let session = await store.session(for: sessionId)
-        XCTAssertEqual(session?.phase, .processing)
+        XCTAssertEqual(session?.phase, .idle)
         XCTAssertEqual(session?.latestHookMessage, "Remote task snapshot")
 
         await store.process(.sessionArchived(sessionId: sessionId))

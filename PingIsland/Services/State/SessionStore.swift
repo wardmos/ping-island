@@ -440,7 +440,6 @@ actor SessionStore {
                 await TelemetryService.shared.recordSessionDetected(session)
             }
         }
-        let persistedSessionBeforeAwait = sessions[sessionId]
 
         let tree = (event.pid != nil || event.tty != nil) ? ProcessTreeBuilder.shared.buildTree() : [:]
         let hadActiveClaudeQuestion = session.intervention?.kind == .question
@@ -484,13 +483,10 @@ actor SessionStore {
         }
 
         // After the await points another event may have mutated the persisted
-        // copy (actor reentrancy). Metadata-only snapshots must detect all such
-        // mutations because some lifecycle changes do not update lastActivity.
-        let latestSession = sessions[sessionId]
-        let snapshotStateChangedDuringAwait = isRemoteCodexThreadSnapshot
-            && latestSession != persistedSessionBeforeAwait
-        if let latest = latestSession,
-           snapshotStateChangedDuringAwait || latest.lastActivity > session.lastActivity {
+        // copy (actor reentrancy). Metadata-only snapshots always reload it
+        // because lifecycle changes may leave lastActivity unchanged.
+        if let latest = sessions[sessionId],
+           isRemoteCodexThreadSnapshot || latest.lastActivity > session.lastActivity {
             session = latest
             // Re-apply enrichment
             session.clientInfo = session.clientInfo.merged(with: event.clientInfo)
