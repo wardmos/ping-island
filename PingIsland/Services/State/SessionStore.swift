@@ -92,6 +92,7 @@ actor SessionStore {
     private var pendingHookResponseCancellationHandler: @Sendable (String, SessionIngress) -> Void = {
         SessionStore.cancelPendingHookResponse(toolUseId: $0, ingress: $1)
     }
+    private var hookEventPostPersistHandlerForTesting: (@Sendable (String) async -> Void)?
 
     /// Periodic sweep that removes sessions whose Claude process has died
     /// without delivering `SessionEnd` (Ctrl-C kill, OOM, terminal closed) and
@@ -231,6 +232,12 @@ actor SessionStore {
         pendingHookResponseCancellationHandler = handler ?? {
             SessionStore.cancelPendingHookResponse(toolUseId: $0, ingress: $1)
         }
+    }
+
+    func setHookEventPostPersistHandlerForTesting(
+        _ handler: (@Sendable (String) async -> Void)?
+    ) {
+        hookEventPostPersistHandlerForTesting = handler
     }
 
     // MARK: - Hook Event Processing
@@ -446,6 +453,12 @@ actor SessionStore {
         // session.
         let isNewSession = sessions[sessionId] == nil
         if isNewSession {
+            // Compact starts a new model request when it is the first event we
+            // observe. Seed that state before any await, then preserve whatever
+            // a concurrent event writes while this handler is suspended.
+            if event.isCodexCompactionSessionStart {
+                session.phase = .processing
+            }
             IslandTrace.emit(
                 "store.create",
                 "session=\(IslandTrace.tag(sessionId)) event=\(event.event) status=\(event.status) cwd=\(IslandTrace.text(event.cwd, limit: 80))"
@@ -455,6 +468,10 @@ actor SessionStore {
             Task {
                 await TelemetryService.shared.recordSessionDetected(session)
             }
+        }
+        let persistedSessionBeforeAwait = session
+        if let hookEventPostPersistHandlerForTesting {
+            await hookEventPostPersistHandlerForTesting(sessionId)
         }
 
         let canInspectProcessLocally = event.ingress.usesLocalProcessNamespace
@@ -498,11 +515,15 @@ actor SessionStore {
             }
         }
 
-        // After the await points another event may have mutated the persisted
-        // copy (actor reentrancy).  Merge the enriched client info into the
-        // latest snapshot so we don't silently discard phase / chatItem changes
-        // made by the concurrent event.
-        if let latest = sessions[sessionId], latest.lastActivity > session.lastActivity {
+        // A compact continuation must retain concurrent lifecycle changes, even
+        // with unchanged timestamps, and must not recreate an archived session.
+        if event.isCodexCompactionSessionStart, sessions[sessionId] == nil {
+            return
+        }
+        if let latest = sessions[sessionId],
+           (event.isCodexCompactionSessionStart
+                ? latest != persistedSessionBeforeAwait
+                : latest.lastActivity > session.lastActivity) {
             session = latest
             // Re-apply enrichment
             session.clientInfo = normalizedClientInfo(session.clientInfo, merging: event.clientInfo, provider: event.provider, sessionId: sessionId)
@@ -601,6 +622,14 @@ actor SessionStore {
         let isRemoteCodexThreadSnapshot = event.provider == .codex
             && event.ingress == .remoteBridge
             && event.event == "RemoteCodexThreadUpdated"
+        // Discovery-only idle metadata is not completion evidence. A compact
+        // hook can resume it, while completed, interrupted and pending states stay put.
+        let resumesRemoteDiscovery = event.isCodexCompactionSessionStart
+            && session.phase == .idle
+            && event.ingress == .remoteBridge
+            && !session.hasRemoteCodexTurnCompletion
+            && !session.isCodexTurnInterrupted
+            && session.intervention == nil
         // `SubagentStop` reports that a child finished. It says nothing about
         // whether the parent is still working, so it must not move the parent's
         // phase: the parent's own Stop had already landed, and a trailing
@@ -608,6 +637,8 @@ actor SessionStore {
         // coming to correct it. `SubagentStart` stays authoritative, because a
         // parent that just spawned a child demonstrably is working.
         let preservesExistingPhase = isRemoteCodexThreadSnapshot || event.event == "SubagentStop"
+            || (event.isCodexCompactionSessionStart
+                && session.phase != .compacting && !resumesRemoteDiscovery)
         let newPhase: SessionPhase = preservesExistingPhase
             ? session.phase
             : inferredPhase
@@ -671,8 +702,11 @@ actor SessionStore {
             && !hasIncomingIntervention
             && newPhase != .waitingForInput
             && !shouldClearCurrentIntervention
+        let shouldPreserveCompactSessionState = event.isCodexCompactionSessionStart
 
-        if let preservedPendingApproval {
+        if shouldPreserveCompactSessionState {
+            session.phase = newPhase
+        } else if let preservedPendingApproval {
             Self.logger.debug(
                 "Preserving waitingForApproval for \(sessionId.prefix(8), privacy: .public) on \(event.event, privacy: .public)"
             )
@@ -703,7 +737,10 @@ actor SessionStore {
             )
         }
 
-        if let intervention {
+        if shouldPreserveCompactSessionState {
+            // Compaction is a boundary inside the current turn. Keep any
+            // approval or question state paired with the preserved phase.
+        } else if let intervention {
             if shouldQueuePendingQuestionIntervention(intervention, in: session) {
                 enqueuePendingQuestionIntervention(intervention, in: &session)
             } else if session.clientInfo.brand == .qoder, intervention.kind == .question {

@@ -504,6 +504,29 @@ func mapsCodexSessionStartAsIdleLifecycleEvent() throws {
 }
 
 @Test
+func mapsCodexCompactSessionStartAsActiveContinuation() throws {
+    let payload = """
+    {
+      "hook_event_name": "SessionStart",
+      "session_id": "codex-compacted-thread",
+      "source": "compact"
+    }
+    """.data(using: .utf8)!
+
+    let envelope = HookPayloadMapper.makeEnvelope(
+        source: .codex,
+        arguments: ["island-bridge", "--source", "codex"],
+        environment: ["PWD": "/tmp/demo", "TERM_PROGRAM": "codex"],
+        stdinData: payload
+    )
+
+    #expect(envelope.status?.kind == .active)
+    #expect(envelope.metadata["source"] == "compact")
+    #expect(envelope.intervention == nil)
+    #expect(!envelope.expectsResponse)
+}
+
+@Test
 func mapsClaudeIDEAndRemoteContextFromEnvironment() throws {
     let payload = """
     {

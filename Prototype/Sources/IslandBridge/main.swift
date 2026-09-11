@@ -1999,6 +1999,7 @@ private struct RemoteHookEventPayload: Codable {
     let toolUseID: String?
     let notificationType: String?
     let message: String?
+    let sessionStartSource: String?
     let expectsResponse: Bool
     let approvalsReviewer: String?
     let clientInfo: RemoteHookClientInfoPayload
@@ -2078,6 +2079,7 @@ private enum RemoteBridgeMessageBuilder {
             toolUseID: toolUseID,
             notificationType: metadata["notification_type"],
             message: metadata["message"] ?? envelope.preview,
+            sessionStartSource: envelope.eventType == "SessionStart" ? metadata["source"] : nil,
             expectsResponse: envelope.expectsResponse,
             approvalsReviewer: metadata["approvals_reviewer"],
             clientInfo: RemoteHookClientInfoPayload(
@@ -2125,6 +2127,7 @@ private enum RemoteBridgeMessageBuilder {
             toolUseID: nil,
             notificationType: nil,
             message: message,
+            sessionStartSource: nil,
             expectsResponse: false,
             approvalsReviewer: nil,
             clientInfo: RemoteHookClientInfoPayload(

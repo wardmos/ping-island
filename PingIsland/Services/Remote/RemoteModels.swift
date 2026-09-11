@@ -380,6 +380,7 @@ struct RemoteHookEventPayload: Codable, Sendable {
     let toolUseID: String?
     let notificationType: String?
     let message: String?
+    let sessionStartSource: String?
     let expectsResponse: Bool
     let permissionMode: String?
     let clientInfo: RemoteHookClientInfoPayload

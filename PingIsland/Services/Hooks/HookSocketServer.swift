@@ -84,6 +84,8 @@ struct HookEvent: Sendable {
     let bridgeIntervention: SessionIntervention?
     let bridgeExpectsResponse: Bool?
     let suppressInAppPrompt: Bool
+    /// Why a lifecycle SessionStart fired, when supplied by the hook client.
+    let sessionStartSource: String?
     /// True for a PermissionRequest with `permission_mode=bypassPermissions` (Claude or Codex).
     /// Tool approvals can return immediately; question requests must still wait for an answer.
     let codexBypassPermissions: Bool
@@ -106,6 +108,7 @@ struct HookEvent: Sendable {
         bridgeIntervention: SessionIntervention? = nil,
         bridgeExpectsResponse: Bool? = nil,
         suppressInAppPrompt: Bool = false,
+        sessionStartSource: String? = nil,
         codexBypassPermissions: Bool = false
     ) {
         self.sessionId = sessionId
@@ -125,12 +128,23 @@ struct HookEvent: Sendable {
         self.bridgeIntervention = bridgeIntervention
         self.bridgeExpectsResponse = bridgeExpectsResponse
         self.suppressInAppPrompt = suppressInAppPrompt
+        self.sessionStartSource = sessionStartSource
         self.codexBypassPermissions = codexBypassPermissions
+    }
+
+    nonisolated var isCodexCompactionSessionStart: Bool {
+        provider == .codex
+            && event == "SessionStart"
+            && sessionStartSource == "compact"
     }
 
     nonisolated var sessionPhase: SessionPhase {
         if event == "PreCompact" {
             return .compacting
+        }
+
+        if isCodexCompactionSessionStart {
+            return .processing
         }
 
         if shouldSuppressApprovalHandling,
@@ -324,6 +338,7 @@ extension HookEvent {
             bridgeIntervention: bridgeIntervention?.withResolvedToolUseId(toolUseId),
             bridgeExpectsResponse: bridgeExpectsResponse,
             suppressInAppPrompt: suppressInAppPrompt,
+            sessionStartSource: sessionStartSource,
             codexBypassPermissions: codexBypassPermissions
         )
     }
@@ -347,6 +362,7 @@ extension HookEvent {
             bridgeIntervention: bridgeIntervention,
             bridgeExpectsResponse: bridgeExpectsResponse,
             suppressInAppPrompt: suppressInAppPrompt,
+            sessionStartSource: sessionStartSource,
             codexBypassPermissions: codexBypassPermissions
         )
     }
@@ -730,6 +746,7 @@ private extension BridgeEnvelope {
             ),
             bridgeExpectsResponse: expectsResponse,
             suppressInAppPrompt: (metadata["suppress_in_app_prompt"] == "true"),
+            sessionStartSource: metadata["source"],
             codexBypassPermissions: (
                 eventType == "PermissionRequest"
                 && metadata["permission_mode"] == "bypassPermissions"

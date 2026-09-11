@@ -646,6 +646,10 @@ extension HookEvent {
             return .idle
         }
 
+        if isCodexCompactionSessionStart {
+            return .processing
+        }
+
         // ChatGPT emits SessionStart as soon as a blank thread is created.
         // That lifecycle event is not a request for user input; the following
         // UserPromptSubmit event will move the session into processing.
