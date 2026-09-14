@@ -142,6 +142,14 @@ nonisolated enum SessionCompletionStateEvaluator {
     /// Treat tool-only or commentary-only updates as in-progress. A completion notification
     /// should only fire once the session has an actual assistant reply ready for the user.
     static func hasCompletedAssistantReply(for session: SessionState) -> Bool {
+        // Missing prompt or reply text can leave an older assistant item at the
+        // end of remote history. Require a reply from the current turn as well.
+        if session.provider == .codex,
+           session.ingress == .remoteBridge,
+           session.lastMessageRole != "assistant" {
+            return false
+        }
+
         for item in session.chatItems.reversed() {
             switch item.type {
             case .assistant:
