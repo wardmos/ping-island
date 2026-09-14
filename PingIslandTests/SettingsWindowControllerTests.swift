@@ -150,7 +150,7 @@ final class SettingsWindowControllerTests: XCTestCase {
     }
 
     func testThemeBackdropDoesNotCoverWindowContentOrTrafficLights() async throws {
-        let controller = SettingsWindowController.shared
+        let controller = SettingsWindowController()
         let settings = AppSettings.shared
         let originalTheme = settings.experienceThemeID
         controller.present()
@@ -162,9 +162,12 @@ final class SettingsWindowControllerTests: XCTestCase {
             controller.dismiss()
         }
 
-        for theme in ExperienceThemeID.allCases {
-            settings.experienceThemeID = theme
-            window.setContentSize(NSSize(width: 1000, height: 600))
+        // Check the fresh window before changing its theme or size.
+        for theme in [nil] + ExperienceThemeID.allCases.map({ Optional($0) }) {
+            if let theme {
+                settings.experienceThemeID = theme
+                window.setContentSize(NSSize(width: 1000, height: 600))
+            }
             try await Task.sleep(for: .milliseconds(100))
             let content = try XCTUnwrap(window.contentView)
             let frame = try XCTUnwrap(content.superview)

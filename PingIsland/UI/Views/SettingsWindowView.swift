@@ -2547,10 +2547,8 @@ private final class SettingsWindowThemeBridgeView: NSView {
             backdrop.autoresizingMask = [.width, .height]
         }
 
-        // During viewDidMoveToWindow the hosting view may not yet be an
-        // installed sibling. Inserting relative to it can leave the backdrop
-        // above both the content and traffic lights on macOS 14. Keep it at
-        // the bottom of the frame hierarchy, including after theme updates.
+        // Keep the backdrop below the content and native window controls,
+        // including when theme updates reuse an existing backdrop.
         if frameView.subviews.first !== backdrop {
             frameView.addSubview(backdrop, positioned: .below, relativeTo: nil)
         }
