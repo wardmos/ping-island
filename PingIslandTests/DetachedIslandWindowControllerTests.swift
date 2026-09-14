@@ -1203,6 +1203,49 @@ final class DetachedIslandWindowControllerTests: XCTestCase {
         wait(for: [dismissed], timeout: 1.0)
     }
 
+    func testSuppressedRemoteCodexLateReplyDoesNotReplayAfterUnmuting() {
+        let originalAutoOpenCompletionPanel = AppSettings.autoOpenCompletionPanel
+        let originalMuteUntil = AppSettings.temporarilyMuteNotificationsUntil
+        AppSettings.autoOpenCompletionPanel = true
+        AppSettings.muteReminderNotifications(for: 60)
+        defer {
+            AppSettings.autoOpenCompletionPanel = originalAutoOpenCompletionPanel
+            AppSettings.temporarilyMuteNotificationsUntil = originalMuteUntil
+        }
+
+        let sessionId = "remote-codex-suppressed-late-reply-\(UUID().uuidString)"
+        var processing = makeSession(id: sessionId, phase: .processing, clientInfo: .codexCLI())
+        processing.provider = .codex
+        processing.ingress = .remoteBridge
+        let sessionMonitor = makeSessionMonitor()
+        sessionMonitor.instances = [processing]
+        let controller = DetachedIslandWindowController(
+            viewModel: makeViewModel(),
+            sessionMonitor: sessionMonitor,
+            onClose: {}
+        )
+        defer { controller.dismiss() }
+        controller.present(atPetAnchor: CGPoint(x: 1200, y: 220))
+
+        var emptyStop = processing
+        emptyStop.phase = .idle
+        controller.applySessionSnapshotForTesting([emptyStop])
+        XCTAssertNil(controller.currentActiveCompletionNotificationForTesting)
+
+        var reply = makeCodexCompletedSession(id: sessionId)
+        reply.clientInfo = .codexCLI()
+        reply.ingress = .remoteBridge
+        controller.applySessionSnapshotForTesting([reply])
+        XCTAssertNil(controller.currentActiveCompletionNotificationForTesting)
+
+        AppSettings.clearReminderNotificationMute()
+        XCTAssertFalse(AppSettings.areReminderNotificationsSuppressed)
+        controller.applySessionSnapshotForTesting([reply])
+        XCTAssertNil(controller.currentActiveCompletionNotificationForTesting)
+        XCTAssertEqual(controller.renderedBubbleStateForTesting, .hidden)
+        XCTAssertFalse(controller.isBubbleVisibleForTesting)
+    }
+
     func testDismissedCodexCompletionDoesNotReopenAfterThreadRefresh() {
         let originalAutoOpenCompletionPanel = AppSettings.autoOpenCompletionPanel
         AppSettings.autoOpenCompletionPanel = true
