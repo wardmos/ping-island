@@ -188,6 +188,7 @@ enum SessionCompletionNotificationPolicy {
     static func shouldQueueCompletedNotification(
         for session: SessionState,
         previousPhase: SessionPhase?,
+        wasCompletedReady: Bool? = nil,
         isEnabled: Bool,
         now: Date = Date()
     ) -> Bool {
@@ -196,7 +197,12 @@ enum SessionCompletionNotificationPolicy {
 
         if session.provider == .codex {
             guard session.phase == .idle else { return false }
-            guard let previousPhase, isCodexCompletionSourcePhase(previousPhase) else {
+            // A remote Stop can settle the phase before its final reply arrives.
+            let isLateRemoteReply = session.ingress == .remoteBridge
+                && previousPhase == .idle
+                && wasCompletedReady == false
+            guard let previousPhase,
+                  isCodexCompletionSourcePhase(previousPhase) || isLateRemoteReply else {
                 return false
             }
             return wasTrackedOrRecentlyCreated(session, previousPhase: previousPhase, now: now)

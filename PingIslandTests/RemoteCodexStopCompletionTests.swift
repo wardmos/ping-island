@@ -101,6 +101,7 @@ final class RemoteCodexStopCompletionTests: XCTestCase {
         await store.process(.sessionArchived(sessionId: sessionId))
     }
 
+    @MainActor
     func testEmptyStopAfterMissingPromptAndToolIDDoesNotReuseEarlierCompletion() async {
         let sessionId = "codex-remote-stop-missing-boundary-\(UUID().uuidString)"
         let store = SessionStore.shared
@@ -127,6 +128,11 @@ final class RemoteCodexStopCompletionTests: XCTestCase {
         XCTAssertEqual(assistantMessages(in: session), ["Done."])
         XCTAssertFalse(session.map(SessionCompletionStateEvaluator.isCompletedReadySession) ?? true)
         XCTAssertNil(session.flatMap(SessionCompletionKey.make(for:)))
+        XCTAssertFalse(session.map {
+            SessionCompletionNotificationPolicy.shouldQueueCompletedNotification(
+                for: $0, previousPhase: .processing, isEnabled: true
+            )
+        } ?? true)
 
         // A delayed final reply still completes this turn, even if the text repeats.
         await processStop("Done.", sessionId: sessionId, store: store)
@@ -135,6 +141,14 @@ final class RemoteCodexStopCompletionTests: XCTestCase {
         let completionKey = completedSession.flatMap(SessionCompletionKey.make(for:))
         XCTAssertNotNil(completionKey)
         XCTAssertNotEqual(completionKey, firstKey)
+        XCTAssertTrue(completedSession.map {
+            SessionCompletionNotificationPolicy.shouldQueueCompletedNotification(
+                for: $0,
+                previousPhase: session?.phase,
+                wasCompletedReady: session.map(SessionCompletionStateEvaluator.isCompletedReadySession),
+                isEnabled: true
+            )
+        } ?? false)
 
         await store.process(.sessionArchived(sessionId: sessionId))
     }
