@@ -21,7 +21,6 @@ This file is a routing layer for coding agents working in this repo. Keep it sho
 - App entry: `PingIsland/App/PingIslandApp.swift`, `PingIsland/App/AppDelegate.swift`
 - Docked/detached presentation orchestration: `PingIsland/App/IslandPresentationCoordinator.swift`, `PingIsland/App/WindowManager.swift`
 - First-run surface-mode onboarding and mode-switch UI: `PingIsland/App/AppDelegate.swift`, `PingIsland/UI/Window/SettingsWindowController.swift`, `PingIsland/UI/Views/SettingsWindowView.swift`
-  - Settings' native theme backdrop must stay at the bottom of the window frame hierarchy and ignore hit testing. During hosting-view attachment, inserting relative to the content view can place it above the content and traffic lights on macOS 14; preserve coverage for theme changes and resizing.
 - Main state hub: `PingIsland/Services/State/SessionStore.swift`
 - Session association cache: `PingIsland/Services/State/SessionAssociationStore.swift`
 - Usage/quota snapshots for Claude status-line caches, Claude-family transcript token totals, and Codex rollout logs: `PingIsland/Services/Usage/`

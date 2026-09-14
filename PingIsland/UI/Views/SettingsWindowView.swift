@@ -4282,7 +4282,6 @@ struct SettingsWindowView: View {
                 presentation: .window,
                 onClose: onClose
             )
-            .accessibilityElement(children: .contain)
             .accessibilityIdentifier("settings.root")
         }
     }
