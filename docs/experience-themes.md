@@ -71,6 +71,13 @@ content adds controls and optional Pixel grid texture without repainting the
 translucent base, so the bar and body match without double-compositing. Both
 columns retain explicit spacing below the titlebar.
 
+The native backdrop is inserted below every window-frame subview and never
+participates in hit testing. Theme updates maintain that ordering. Inserting
+relative to `window.contentView` during hosting-view attachment can leave the
+backdrop on top on macOS 14, hiding the page and intercepting the traffic lights.
+Settings window tests cover content/button hit testing and backdrop ordering
+across all themes and window resizing.
+
 Inside that shell, each theme owns its sidebar rows and content surfaces:
 
 - **PingIsland native** keeps the project's original colored icon tiles,

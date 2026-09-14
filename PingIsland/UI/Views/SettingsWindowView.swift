@@ -2545,7 +2545,14 @@ private final class SettingsWindowThemeBridgeView: NSView {
             backdrop = SettingsWindowBackdropView(frame: frameView.bounds)
             backdrop.identifier = SettingsWindowBackdropView.identifier
             backdrop.autoresizingMask = [.width, .height]
-            frameView.addSubview(backdrop, positioned: .below, relativeTo: window.contentView)
+        }
+
+        // During viewDidMoveToWindow the hosting view may not yet be an
+        // installed sibling. Inserting relative to it can leave the backdrop
+        // above both the content and traffic lights on macOS 14. Keep it at
+        // the bottom of the frame hierarchy, including after theme updates.
+        if frameView.subviews.first !== backdrop {
+            frameView.addSubview(backdrop, positioned: .below, relativeTo: nil)
         }
 
         // One AppKit backdrop owns the base color from the native titlebar
@@ -2570,6 +2577,8 @@ private final class SettingsWindowBackdropView: NSView {
     private let sidebarTint = NSView()
     private let detailTint = NSView()
     private var sidebarWidth: CGFloat = 0
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -4273,6 +4282,7 @@ struct SettingsWindowView: View {
                 presentation: .window,
                 onClose: onClose
             )
+            .accessibilityElement(children: .contain)
             .accessibilityIdentifier("settings.root")
         }
     }
