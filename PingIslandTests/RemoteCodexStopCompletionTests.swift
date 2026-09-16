@@ -2,22 +2,20 @@ import Foundation
 import XCTest
 @testable import Ping_Island
 
+@MainActor
 final class RemoteCodexStopCompletionTests: XCTestCase {
+    private let store = SessionStore.shared
+
     func testEmptyStopAfterSnapshotDiscoveryCompletesOnceWithoutPrompt() async throws {
-        let sessionId = "codex-remote-snapshot-stop-\(UUID().uuidString)"
-        let store = SessionStore.shared
+        let sessionId = makeSessionID()
         var sounds = SessionSoundEdgeTracker()
         sounds.prime(with: [])
 
-        await processSnapshot(sessionId: sessionId, store: store)
-        let discoveredSession = await store.session(for: sessionId)
-        let discovered = try XCTUnwrap(discoveredSession)
+        let discovered = try await processSnapshot(sessionId: sessionId)
         XCTAssertNil(SessionCompletionKey.make(for: discovered))
         XCTAssertNotEqual(sounds.edge(for: [discovered])?.event, .taskCompleted)
 
-        await processStop(nil, sessionId: sessionId, store: store)
-        let stoppedSession = await store.session(for: sessionId)
-        let stopped = try XCTUnwrap(stoppedSession)
+        let stopped = try await processStop(nil, sessionId: sessionId)
         let key = try XCTUnwrap(SessionCompletionKey.make(for: stopped))
         XCTAssertEqual(sounds.edge(for: [stopped])?.event, .taskCompleted)
         XCTAssertTrue(SessionCompletionNotificationPolicy.shouldQueueCompletedNotification(
@@ -26,15 +24,11 @@ final class RemoteCodexStopCompletionTests: XCTestCase {
         ))
 
         for reply in [nil, "Done.", "Done."] as [String?] {
-            await processSnapshot(sessionId: sessionId, store: store)
-            let snapshotSession = await store.session(for: sessionId)
-            let snapshot = try XCTUnwrap(snapshotSession)
+            let snapshot = try await processSnapshot(sessionId: sessionId)
             XCTAssertEqual(SessionCompletionKey.make(for: snapshot), key)
             XCTAssertNil(sounds.edge(for: [snapshot]))
 
-            await processStop(reply, sessionId: sessionId, store: store)
-            let refreshedSession = await store.session(for: sessionId)
-            let refreshed = try XCTUnwrap(refreshedSession)
+            let refreshed = try await processStop(reply, sessionId: sessionId)
             XCTAssertEqual(SessionCompletionKey.make(for: refreshed), key)
             XCTAssertNil(sounds.edge(for: [refreshed]))
             XCTAssertFalse(SessionCompletionNotificationPolicy.shouldQueueCompletedNotification(
@@ -42,261 +36,149 @@ final class RemoteCodexStopCompletionTests: XCTestCase {
                 isEnabled: true
             ))
         }
-
-        await store.process(.sessionArchived(sessionId: sessionId))
     }
 
     func testTranscriptEnrichmentPreservesStopAfterSnapshotDiscovery() async throws {
-        let sessionId = "codex-remote-snapshot-enrichment-\(UUID().uuidString)"
-        let store = SessionStore.shared
-        await processSnapshot(sessionId: sessionId, store: store)
-        let originalSession = await store.session(for: sessionId)
-        let original = try XCTUnwrap(originalSession)
-
-        await processStop(nil, sessionId: sessionId, store: store)
-        let stopped = await store.session(for: sessionId)
-        let key = try XCTUnwrap(stopped.flatMap(SessionCompletionKey.make(for:)))
+        let sessionId = makeSessionID()
+        let original = try await processSnapshot(sessionId: sessionId)
+        let stopped = try await processStop(nil, sessionId: sessionId)
+        let key = try XCTUnwrap(SessionCompletionKey.make(for: stopped))
         let committed = await store.commitTranscriptUpdate(original, basedOn: original)
         XCTAssertEqual(committed.flatMap(SessionCompletionKey.make(for:)), key)
-
-        await store.process(.sessionArchived(sessionId: sessionId))
     }
 
     func testTranscriptEnrichmentDoesNotRestoreStopDuringNewTurn() async throws {
-        let sessionId = "codex-remote-new-turn-enrichment-\(UUID().uuidString)"
-        let store = SessionStore.shared
-        await processStop(nil, sessionId: sessionId, store: store)
-        let originalSession = await store.session(for: sessionId)
-        let original = try XCTUnwrap(originalSession)
-
-        await processPrompt(nil, sessionId: sessionId, store: store)
+        let sessionId = makeSessionID()
+        let original = try await processStop(nil, sessionId: sessionId)
+        try await processPrompt(nil, sessionId: sessionId)
         let committed = await store.commitTranscriptUpdate(original, basedOn: original)
         XCTAssertEqual(committed?.phase, .processing)
         XCTAssertEqual(committed?.hasRemoteCodexTurnCompletion, false)
         XCTAssertNil(committed.flatMap(SessionCompletionKey.make(for:)))
-
-        await store.process(.sessionArchived(sessionId: sessionId))
     }
 
-    func testStopPromotesFinalReplyAndCompletesTurn() async {
-        let sessionId = "codex-remote-stop-\(UUID().uuidString)"
-        let store = SessionStore.shared
+    func testFinalRepliesCompleteOnceWithoutDuplicatingAssistantTail() async throws {
+        for reply in ["Remote work is complete.", "Stop"] {
+            let sessionId = makeSessionID()
+            try await processPrompt("Complete the remote task.", sessionId: sessionId)
+            let completed = try await processStop(reply, sessionId: sessionId)
+            XCTAssertEqual(completed.phase, .idle)
+            XCTAssertEqual(completed.lastMessageRole, "assistant")
+            XCTAssertEqual(completed.lastMessage, reply)
+            XCTAssertEqual(assistantMessages(in: completed), [reply])
+            XCTAssertTrue(SessionCompletionStateEvaluator.isCompletedReadySession(completed))
+            let key = try XCTUnwrap(SessionCompletionKey.make(for: completed))
 
-        await processPrompt("Complete the remote task.", sessionId: sessionId, store: store)
-        await processStop("Remote work is complete.", sessionId: sessionId, store: store)
-
-        let session = await store.session(for: sessionId)
-        XCTAssertEqual(session?.phase, .idle)
-        XCTAssertEqual(session?.lastMessageRole, "assistant")
-        XCTAssertEqual(session?.lastMessage, "Remote work is complete.")
-        XCTAssertEqual(assistantMessages(in: session), ["Remote work is complete."])
-        XCTAssertTrue(session.map(SessionCompletionStateEvaluator.isCompletedReadySession) ?? false)
-
-        await store.process(.sessionArchived(sessionId: sessionId))
+            try await processSnapshot(sessionId: sessionId)
+            try await processStop(reply, sessionId: sessionId)
+            let replayed = try await processStop(nil, sessionId: sessionId)
+            XCTAssertEqual(assistantMessages(in: replayed), [reply])
+            XCTAssertEqual(replayed.previewText, reply)
+            XCTAssertEqual(SessionCompletionPreviewBuilder.latestUserText(for: replayed), "Complete the remote task.")
+            XCTAssertEqual(SessionCompletionKey.make(for: replayed), key)
+        }
     }
 
-    @MainActor
-    func testRepeatedStopDoesNotDuplicateAssistantTail() async {
-        let sessionId = "codex-remote-stop-repeat-\(UUID().uuidString)"
-        let store = SessionStore.shared
-
-        await processPrompt("Complete the remote task.", sessionId: sessionId, store: store)
-        await processStop("Remote work is complete.", sessionId: sessionId, store: store)
-        let firstSession = await store.session(for: sessionId)
-        let firstKey = firstSession.flatMap(SessionCompletionKey.make(for:))
-        XCTAssertNotNil(firstKey)
-        await processSnapshot(sessionId: sessionId, store: store)
-        await processStop("Remote work is complete.", sessionId: sessionId, store: store)
-        await processStop(nil, sessionId: sessionId, store: store)
-
-        let session = await store.session(for: sessionId)
-        XCTAssertEqual(assistantMessages(in: session), ["Remote work is complete."])
-        XCTAssertEqual(session?.previewText, "Remote work is complete.")
-        XCTAssertEqual(session.flatMap { SessionCompletionPreviewBuilder.latestUserText(for: $0) }, "Complete the remote task.")
-        XCTAssertEqual(session.flatMap(SessionCompletionKey.make(for:)), firstKey)
-
-        await store.process(.sessionArchived(sessionId: sessionId))
-    }
-
-    func testLiteralStopReplyCountsAsCompletion() async {
-        let sessionId = "codex-remote-stop-literal-\(UUID().uuidString)"
-        let store = SessionStore.shared
-
-        await processPrompt("Reply with one word.", sessionId: sessionId, store: store)
-        await processStop("Stop", sessionId: sessionId, store: store)
-
-        let session = await store.session(for: sessionId)
-        XCTAssertEqual(session?.phase, .idle)
-        XCTAssertEqual(session?.lastMessageRole, "assistant")
-        XCTAssertEqual(assistantMessages(in: session), ["Stop"])
-        XCTAssertTrue(session.map(SessionCompletionStateEvaluator.isCompletedReadySession) ?? false)
-
-        await store.process(.sessionArchived(sessionId: sessionId))
-    }
-
-    func testStopWithoutFinalReplyCompletesNewTurnWithoutReusingEarlierReply() async {
-        let store = SessionStore.shared
+    func testStopWithoutFinalReplyCompletesNewTurnWithoutReusingEarlierReply() async throws {
         let prompts: [(message: String?, expectedPreview: String?)] = [
             ("Complete the second task.", "Complete the second task."),
             (nil, nil), ("", nil), (" \n\t", nil)
         ]
 
         for (prompt, expectedPreview) in prompts {
-            let sessionId = "codex-remote-stop-empty-\(UUID().uuidString)"
-            await processPrompt("Complete the first task.", sessionId: sessionId, store: store)
-            await processStop("Done.", sessionId: sessionId, store: store)
-            let firstSession = await store.session(for: sessionId)
-            let firstKey = firstSession.flatMap(SessionCompletionKey.make(for:))
-            XCTAssertNotNil(firstKey)
-            await processPrompt(prompt, sessionId: sessionId, store: store)
-            let processing = await store.session(for: sessionId)
-            XCTAssertNil(processing?.previewText)
-            XCTAssertEqual(processing?.lastMessage, expectedPreview)
-            await processStop(nil, sessionId: sessionId, store: store)
+            let sessionId = makeSessionID()
+            let firstKey = try await completeFirstTurn(sessionId: sessionId)
+            let processing = try await processPrompt(prompt, sessionId: sessionId)
+            XCTAssertNil(processing.previewText)
+            XCTAssertEqual(processing.lastMessage, expectedPreview)
 
-            let session = await store.session(for: sessionId)
-            XCTAssertEqual(session?.phase, .idle)
-            XCTAssertEqual(session?.lastMessageRole, "user")
-            XCTAssertNil(session?.previewText)
-            XCTAssertEqual(session?.lastMessage, expectedPreview)
+            let session = try await processStop(nil, sessionId: sessionId)
+            XCTAssertEqual(session.phase, .idle)
+            XCTAssertEqual(session.lastMessageRole, "user")
+            XCTAssertNil(session.previewText)
+            XCTAssertEqual(session.lastMessage, expectedPreview)
             XCTAssertEqual(assistantMessages(in: session), ["Done."])
-            XCTAssertTrue(session.map(SessionCompletionStateEvaluator.isCompletedReadySession) ?? false)
-            XCTAssertNil(session.flatMap { SessionCompletionPreviewBuilder.latestAssistantText(for: $0) })
-            let completionKey = session.flatMap(SessionCompletionKey.make(for:))
-            XCTAssertNotNil(completionKey)
-            XCTAssertNotEqual(completionKey, firstKey)
-
-            await store.process(.sessionArchived(sessionId: sessionId))
+            XCTAssertTrue(SessionCompletionStateEvaluator.isCompletedReadySession(session))
+            XCTAssertNil(SessionCompletionPreviewBuilder.latestAssistantText(for: session))
+            let key = try XCTUnwrap(SessionCompletionKey.make(for: session))
+            XCTAssertNotEqual(key, firstKey)
         }
     }
 
-    func testMissingPromptDoesNotPairEarlierQuestionWithNewReply() async {
-        let store = SessionStore.shared
+    func testMissingPromptDoesNotPairEarlierQuestionWithNewReply() async throws {
         for prompt in [nil, "", " \n\t"] as [String?] {
-            let sessionId = "codex-remote-missing-question-\(UUID().uuidString)"
-            await processPrompt("Question A", sessionId: sessionId, store: store)
-            await processStop("Reply A", sessionId: sessionId, store: store)
-            await processPrompt(prompt, sessionId: sessionId, store: store)
-            await processStop("Reply B", sessionId: sessionId, store: store)
-
-            let completed = await store.session(for: sessionId)
-            XCTAssertNotNil(completed)
-            XCTAssertNil(completed.flatMap { SessionCompletionPreviewBuilder.latestUserText(for: $0) })
-            XCTAssertEqual(completed.flatMap { SessionCompletionPreviewBuilder.latestAssistantText(for: $0) }, "Reply B")
-            XCTAssertEqual(completed?.conversationInfo.firstUserMessage, "Question A")
+            let sessionId = makeSessionID()
+            try await processPrompt("Question A", sessionId: sessionId)
+            try await processStop("Reply A", sessionId: sessionId)
+            try await processPrompt(prompt, sessionId: sessionId)
+            let completed = try await processStop("Reply B", sessionId: sessionId)
+            XCTAssertNil(SessionCompletionPreviewBuilder.latestUserText(for: completed))
+            XCTAssertEqual(SessionCompletionPreviewBuilder.latestAssistantText(for: completed), "Reply B")
+            XCTAssertEqual(completed.conversationInfo.firstUserMessage, "Question A")
             XCTAssertEqual(assistantMessages(in: completed), ["Reply A", "Reply B"])
 
-            await processPrompt("Question C", sessionId: sessionId, store: store)
-            await processStop("Reply C", sessionId: sessionId, store: store)
-            let next = await store.session(for: sessionId)
-            XCTAssertEqual(next.flatMap { SessionCompletionPreviewBuilder.latestUserText(for: $0) }, "Question C")
-            XCTAssertEqual(next.flatMap { SessionCompletionPreviewBuilder.latestAssistantText(for: $0) }, "Reply C")
-            await store.process(.sessionArchived(sessionId: sessionId))
+            try await processPrompt("Question C", sessionId: sessionId)
+            let next = try await processStop("Reply C", sessionId: sessionId)
+            XCTAssertEqual(SessionCompletionPreviewBuilder.latestUserText(for: next), "Question C")
+            XCTAssertEqual(SessionCompletionPreviewBuilder.latestAssistantText(for: next), "Reply C")
         }
     }
 
-    func testSameReplyCompletesNewTurnAfterMissingPromptBody() async {
-        let sessionId = "codex-remote-stop-missing-prompt-\(UUID().uuidString)"
-        let store = SessionStore.shared
-
-        await processPrompt("Complete the first task.", sessionId: sessionId, store: store)
-        await processStop("Done.", sessionId: sessionId, store: store)
-        let firstSession = await store.session(for: sessionId)
-        let firstKey = firstSession.flatMap(SessionCompletionKey.make(for:))
-        XCTAssertNotNil(firstKey)
-
-        await processPrompt(nil, sessionId: sessionId, store: store)
-        await processStop("Done.", sessionId: sessionId, store: store)
-
-        let session = await store.session(for: sessionId)
-        XCTAssertEqual(session?.phase, .idle)
+    func testSameReplyCompletesNewTurnAfterMissingPromptBody() async throws {
+        let sessionId = makeSessionID()
+        let firstKey = try await completeFirstTurn(sessionId: sessionId)
+        try await processPrompt(nil, sessionId: sessionId)
+        let session = try await processStop("Done.", sessionId: sessionId)
+        XCTAssertEqual(session.phase, .idle)
         XCTAssertEqual(assistantMessages(in: session), ["Done.", "Done."])
-        XCTAssertTrue(session.map(SessionCompletionStateEvaluator.isCompletedReadySession) ?? false)
-        let completionKey = session.flatMap(SessionCompletionKey.make(for:))
-        XCTAssertNotNil(completionKey)
-        XCTAssertNotEqual(completionKey, firstKey)
-
-        await store.process(.sessionArchived(sessionId: sessionId))
+        XCTAssertTrue(SessionCompletionStateEvaluator.isCompletedReadySession(session))
+        let key = try XCTUnwrap(SessionCompletionKey.make(for: session))
+        XCTAssertNotEqual(key, firstKey)
     }
 
-    @MainActor
-    func testEmptyStopAfterMissingPromptAndToolIDDoesNotReuseEarlierCompletion() async {
-        let sessionId = "codex-remote-stop-missing-boundary-\(UUID().uuidString)"
-        let store = SessionStore.shared
+    func testEmptyStopAfterMissingPromptAndToolIDDoesNotReuseEarlierCompletion() async throws {
+        let sessionId = makeSessionID()
+        let firstKey = try await completeFirstTurn(sessionId: sessionId)
+        let active = try await processToolActivity(sessionId: sessionId)
+        XCTAssertFalse(active.hasRemoteCodexTurnCompletion)
+        XCTAssertNil(active.previewText)
+        XCTAssertNil(active.lastMessage)
+        XCTAssertNil(SessionCompletionPreviewBuilder.latestUserText(for: active))
 
-        await processPrompt("Complete the first task.", sessionId: sessionId, store: store)
-        await processStop("Done.", sessionId: sessionId, store: store)
-        let firstSession = await store.session(for: sessionId)
-        let firstKey = firstSession.flatMap(SessionCompletionKey.make(for:))
-        XCTAssertNotNil(firstKey)
-
-        for event in ["PreToolUse", "PostToolUse"] {
-            await store.process(.hookReceived(makeEvent(
-                sessionId: sessionId,
-                event: event,
-                status: event == "PreToolUse" ? "running_tool" : "processing",
-                message: nil,
-                tool: "shell"
-            )))
-        }
-        let activeSession = await store.session(for: sessionId)
-        XCTAssertEqual(activeSession?.hasRemoteCodexTurnCompletion, false)
-        XCTAssertNil(activeSession?.previewText)
-        XCTAssertNil(activeSession?.lastMessage)
-        XCTAssertNil(activeSession.flatMap { SessionCompletionPreviewBuilder.latestUserText(for: $0) })
-        await processStop(nil, sessionId: sessionId, store: store)
-
-        let session = await store.session(for: sessionId)
-        XCTAssertEqual(session?.phase, .idle)
+        let session = try await processStop(nil, sessionId: sessionId)
+        XCTAssertEqual(session.phase, .idle)
         XCTAssertEqual(assistantMessages(in: session), ["Done."])
-        XCTAssertNil(session?.previewText)
-        XCTAssertNil(session?.lastMessage)
-        XCTAssertNil(session.flatMap { SessionCompletionPreviewBuilder.latestUserText(for: $0) })
-        XCTAssertTrue(session.map(SessionCompletionStateEvaluator.isCompletedReadySession) ?? false)
-        XCTAssertNil(session.flatMap { SessionCompletionPreviewBuilder.latestAssistantText(for: $0) })
-        let emptyStopKey = session.flatMap(SessionCompletionKey.make(for:))
-        XCTAssertNotNil(emptyStopKey)
+        XCTAssertNil(session.previewText)
+        XCTAssertNil(session.lastMessage)
+        XCTAssertNil(SessionCompletionPreviewBuilder.latestUserText(for: session))
+        XCTAssertTrue(SessionCompletionStateEvaluator.isCompletedReadySession(session))
+        XCTAssertNil(SessionCompletionPreviewBuilder.latestAssistantText(for: session))
+        let emptyStopKey = try XCTUnwrap(SessionCompletionKey.make(for: session))
         XCTAssertNotEqual(emptyStopKey, firstKey)
-        XCTAssertTrue(session.map {
-            SessionCompletionNotificationPolicy.shouldQueueCompletedNotification(
-                for: $0, previousPhase: .processing, isEnabled: true
-            )
-        } ?? false)
+        XCTAssertTrue(SessionCompletionNotificationPolicy.shouldQueueCompletedNotification(
+            for: session, previousPhase: .processing, isEnabled: true
+        ))
 
         // A delayed final reply enriches the completed turn without changing its identity.
-        await processStop("Done.", sessionId: sessionId, store: store)
-        let completedSession = await store.session(for: sessionId)
-        XCTAssertEqual(assistantMessages(in: completedSession), ["Done.", "Done."])
-        XCTAssertNil(completedSession.flatMap { SessionCompletionPreviewBuilder.latestUserText(for: $0) })
-        XCTAssertEqual(completedSession.flatMap { SessionCompletionPreviewBuilder.latestAssistantText(for: $0) }, "Done.")
-        let completionKey = completedSession.flatMap(SessionCompletionKey.make(for:))
-        XCTAssertNotNil(completionKey)
-        XCTAssertNotEqual(completionKey, firstKey)
-        XCTAssertEqual(completionKey, emptyStopKey)
-        XCTAssertFalse(completedSession.map {
-            SessionCompletionNotificationPolicy.shouldQueueCompletedNotification(
-                for: $0,
-                previousPhase: session?.phase,
-                previousCompletionKey: emptyStopKey,
-                isEnabled: true
-            )
-        } ?? true)
-
-        await store.process(.sessionArchived(sessionId: sessionId))
+        let completed = try await processStop("Done.", sessionId: sessionId)
+        XCTAssertEqual(assistantMessages(in: completed), ["Done.", "Done."])
+        XCTAssertNil(SessionCompletionPreviewBuilder.latestUserText(for: completed))
+        XCTAssertEqual(SessionCompletionPreviewBuilder.latestAssistantText(for: completed), "Done.")
+        XCTAssertEqual(SessionCompletionKey.make(for: completed), emptyStopKey)
+        XCTAssertFalse(SessionCompletionNotificationPolicy.shouldQueueCompletedNotification(
+            for: completed, previousPhase: session.phase, previousCompletionKey: emptyStopKey,
+            isEnabled: true
+        ))
     }
 
-    @MainActor
     func testEmptyStopsNotifyOncePerTurnAndLateRepliesDoNotReplay() async throws {
-        let sessionId = "codex-remote-empty-stop-notifications-\(UUID().uuidString)"
-        let store = SessionStore.shared
+        let sessionId = makeSessionID()
         let registry = SessionCompletionNotificationRegistry()
         var sounds = SessionSoundEdgeTracker()
         var previousKey: SessionCompletionKey?
 
         for turn in 1...2 {
-            await processPrompt("Complete task \(turn).", sessionId: sessionId, store: store)
-            let processingSession = await store.session(for: sessionId)
-            let processing = try XCTUnwrap(processingSession)
+            let processing = try await processPrompt("Complete task \(turn).", sessionId: sessionId)
             XCTAssertFalse(processing.hasRemoteCodexTurnCompletion)
             if turn == 1 {
                 sounds.prime(with: [processing])
@@ -304,9 +186,7 @@ final class RemoteCodexStopCompletionTests: XCTestCase {
                 _ = sounds.edge(for: [processing])
             }
 
-            await processStop(nil, sessionId: sessionId, store: store)
-            let stoppedSession = await store.session(for: sessionId)
-            let stopped = try XCTUnwrap(stoppedSession)
+            let stopped = try await processStop(nil, sessionId: sessionId)
             let key = try XCTUnwrap(SessionCompletionKey.make(for: stopped))
             XCTAssertNotEqual(key, previousKey)
             XCTAssertTrue(SessionCompletionNotificationPolicy.shouldQueueCompletedNotification(
@@ -318,9 +198,7 @@ final class RemoteCodexStopCompletionTests: XCTestCase {
             XCTAssertEqual(notification.identity, .completed(key))
 
             for reply in [nil, "Done.", "Done."] as [String?] {
-                await processStop(reply, sessionId: sessionId, store: store)
-                let refreshedSession = await store.session(for: sessionId)
-                let refreshed = try XCTUnwrap(refreshedSession)
+                let refreshed = try await processStop(reply, sessionId: sessionId)
                 XCTAssertEqual(SessionCompletionKey.make(for: refreshed), key)
                 XCTAssertFalse(SessionCompletionNotificationPolicy.shouldQueueCompletedNotification(
                     for: refreshed, previousPhase: .idle, previousCompletionKey: key, isEnabled: true
@@ -333,114 +211,101 @@ final class RemoteCodexStopCompletionTests: XCTestCase {
         }
 
         let session = await store.session(for: sessionId)
-        XCTAssertEqual(assistantMessages(in: session), ["Done.", "Done."])
-        await store.process(.sessionArchived(sessionId: sessionId))
+        XCTAssertEqual(assistantMessages(in: try XCTUnwrap(session)), ["Done.", "Done."])
     }
 
-    @MainActor
-    func testSameReplyCompletesNewTurnAfterMissingPromptEvent() async {
-        let sessionId = "codex-remote-stop-missing-event-\(UUID().uuidString)"
-        let store = SessionStore.shared
+    func testSameReplyCompletesNewTurnAfterMissingPromptEvent() async throws {
+        let sessionId = makeSessionID()
+        let firstKey = try await completeFirstTurn(sessionId: sessionId)
+        let active = try await processToolActivity(
+            sessionId: sessionId, message: "Current tool activity", toolUseId: "remote-tool-\(sessionId)"
+        )
+        XCTAssertNil(active.previewText)
+        XCTAssertEqual(active.lastMessage, "Current tool activity")
+        XCTAssertNil(SessionCompletionPreviewBuilder.latestUserText(for: active))
 
-        await processPrompt("Complete the first task.", sessionId: sessionId, store: store)
-        await processStop("Done.", sessionId: sessionId, store: store)
-        let firstSession = await store.session(for: sessionId)
-        let firstKey = firstSession.flatMap(SessionCompletionKey.make(for:))
-        XCTAssertNotNil(firstKey)
-
-        for event in ["PreToolUse", "PostToolUse"] {
-            await store.process(.hookReceived(makeEvent(
-                sessionId: sessionId,
-                event: event,
-                status: event == "PreToolUse" ? "running_tool" : "processing",
-                message: "Current tool activity",
-                tool: "shell",
-                toolUseId: "remote-tool-\(sessionId)"
-            )))
-        }
-        let activeSession = await store.session(for: sessionId)
-        XCTAssertNil(activeSession?.previewText)
-        XCTAssertEqual(activeSession?.lastMessage, "Current tool activity")
-        XCTAssertNil(activeSession.flatMap { SessionCompletionPreviewBuilder.latestUserText(for: $0) })
-        await processStop("Done.", sessionId: sessionId, store: store)
-
-        let session = await store.session(for: sessionId)
-        XCTAssertEqual(session?.phase, .idle)
+        let session = try await processStop("Done.", sessionId: sessionId)
+        XCTAssertEqual(session.phase, .idle)
         XCTAssertEqual(assistantMessages(in: session), ["Done.", "Done."])
-        XCTAssertNil(session.flatMap { SessionCompletionPreviewBuilder.latestUserText(for: $0) })
-        let completionKey = session.flatMap(SessionCompletionKey.make(for:))
-        XCTAssertNotNil(completionKey)
-        XCTAssertNotEqual(completionKey, firstKey)
+        XCTAssertNil(SessionCompletionPreviewBuilder.latestUserText(for: session))
+        let key = try XCTUnwrap(SessionCompletionKey.make(for: session))
+        XCTAssertNotEqual(key, firstKey)
 
-        await processStop("Done.", sessionId: sessionId, store: store)
-        let replayedSession = await store.session(for: sessionId)
-        XCTAssertEqual(assistantMessages(in: replayedSession), ["Done.", "Done."])
-        XCTAssertEqual(replayedSession.flatMap(SessionCompletionKey.make(for:)), completionKey)
-
-        await store.process(.sessionArchived(sessionId: sessionId))
+        let replayed = try await processStop("Done.", sessionId: sessionId)
+        XCTAssertEqual(assistantMessages(in: replayed), ["Done.", "Done."])
+        XCTAssertEqual(SessionCompletionKey.make(for: replayed), key)
     }
 
-    func testConversationPreservesFormattingWithoutInjectedReminders() async {
-        let sessionId = "codex-remote-stop-formatting-\(UUID().uuidString)"
-        let store = SessionStore.shared
+    func testConversationPreservesFormattingWithoutInjectedReminders() async throws {
+        let sessionId = makeSessionID()
         let prompt = "Review this code:\n\n```python\nif ready:\n    run()\n```"
         let reply = "## Result\n\n```python\nif ready:\n    run_safely()\n```\n\n- Updated the call."
 
-        await processPrompt("<system-reminder>Client context</system-reminder>\n\(prompt)", sessionId: sessionId, store: store)
-        await processStop("\(reply)\n<system-reminder>Client context</system-reminder>", sessionId: sessionId, store: store)
-        await processStop(reply, sessionId: sessionId, store: store)
-
-        let session = await store.session(for: sessionId)
-        let userMessages = session?.chatItems.compactMap { item -> String? in
+        try await processPrompt("<system-reminder>Client context</system-reminder>\n\(prompt)", sessionId: sessionId)
+        try await processStop("\(reply)\n<system-reminder>Client context</system-reminder>", sessionId: sessionId)
+        let session = try await processStop(reply, sessionId: sessionId)
+        let userMessages = session.chatItems.compactMap { item -> String? in
             guard case .user(let message) = item.type else { return nil }
             return message
         }
         XCTAssertEqual(userMessages, [prompt])
         XCTAssertEqual(assistantMessages(in: session), [reply])
-        XCTAssertEqual(session?.conversationInfo.firstUserMessage, prompt)
-        XCTAssertEqual(session?.conversationInfo.lastMessage, reply)
-        XCTAssertEqual(session?.previewText, reply)
-        XCTAssertTrue(session.map(SessionCompletionStateEvaluator.isCompletedReadySession) ?? false)
-
-        await store.process(.sessionArchived(sessionId: sessionId))
+        XCTAssertEqual(session.conversationInfo.firstUserMessage, prompt)
+        XCTAssertEqual(session.conversationInfo.lastMessage, reply)
+        XCTAssertEqual(session.previewText, reply)
+        XCTAssertTrue(SessionCompletionStateEvaluator.isCompletedReadySession(session))
     }
 
-    private func processPrompt(_ message: String?, sessionId: String, store: SessionStore) async {
-        await store.process(.hookReceived(makeEvent(
-            sessionId: sessionId,
-            event: "UserPromptSubmit",
-            status: "processing",
-            message: message
-        )))
+    private func makeSessionID() -> String {
+        let sessionId = "codex-remote-stop-\(UUID().uuidString)"
+        addTeardownBlock {
+            await SessionStore.shared.process(.sessionArchived(sessionId: sessionId))
+        }
+        return sessionId
     }
 
-    private func processSnapshot(sessionId: String, store: SessionStore) async {
-        await store.process(.hookReceived(makeEvent(
-            sessionId: sessionId,
-            event: "RemoteCodexThreadUpdated",
-            status: "idle",
-            message: "Remote task snapshot"
-        )))
+    private func completeFirstTurn(sessionId: String) async throws -> SessionCompletionKey {
+        try await processPrompt("Complete the first task.", sessionId: sessionId)
+        let session = try await processStop("Done.", sessionId: sessionId)
+        return try XCTUnwrap(SessionCompletionKey.make(for: session))
     }
 
-    private func processStop(_ message: String?, sessionId: String, store: SessionStore) async {
-        await store.process(.hookReceived(makeEvent(
-            sessionId: sessionId,
-            event: "Stop",
-            status: "waiting_for_input",
-            message: message
-        )))
+    @discardableResult
+    private func processPrompt(_ message: String?, sessionId: String) async throws -> SessionState {
+        try await processHook("UserPromptSubmit", status: "processing", message: message, sessionId: sessionId)
     }
 
-    private func makeEvent(
-        sessionId: String,
-        event: String,
-        status: String,
-        message: String?,
-        tool: String? = nil,
-        toolUseId: String? = nil
-    ) -> HookEvent {
-        HookEvent(
+    private func processToolActivity(
+        sessionId: String, message: String? = nil, toolUseId: String? = nil
+    ) async throws -> SessionState {
+        try await processHook(
+            "PreToolUse", status: "running_tool", message: message,
+            sessionId: sessionId, tool: "shell", toolUseId: toolUseId
+        )
+        return try await processHook(
+            "PostToolUse", status: "processing", message: message,
+            sessionId: sessionId, tool: "shell", toolUseId: toolUseId
+        )
+    }
+
+    @discardableResult
+    private func processSnapshot(sessionId: String) async throws -> SessionState {
+        try await processHook(
+            "RemoteCodexThreadUpdated", status: "idle", message: "Remote task snapshot", sessionId: sessionId
+        )
+    }
+
+    @discardableResult
+    private func processStop(_ message: String?, sessionId: String) async throws -> SessionState {
+        try await processHook("Stop", status: "waiting_for_input", message: message, sessionId: sessionId)
+    }
+
+    @discardableResult
+    private func processHook(
+        _ event: String, status: String, message: String?, sessionId: String,
+        tool: String? = nil, toolUseId: String? = nil
+    ) async throws -> SessionState {
+        await store.process(.hookReceived(HookEvent(
             sessionId: sessionId,
             cwd: "/tmp/remote-project-\(sessionId)",
             event: event,
@@ -455,13 +320,15 @@ final class RemoteCodexStopCompletionTests: XCTestCase {
             notificationType: nil,
             message: message,
             ingress: .remoteBridge
-        )
+        )))
+        let session = await store.session(for: sessionId)
+        return try XCTUnwrap(session)
     }
 
-    private func assistantMessages(in session: SessionState?) -> [String] {
-        session?.chatItems.compactMap { item in
+    private func assistantMessages(in session: SessionState) -> [String] {
+        session.chatItems.compactMap { item in
             guard case .assistant(let message) = item.type else { return nil }
             return message
-        } ?? []
+        }
     }
 }
