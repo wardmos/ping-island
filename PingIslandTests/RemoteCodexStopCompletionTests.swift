@@ -109,6 +109,7 @@ final class RemoteCodexStopCompletionTests: XCTestCase {
 
         let session = await store.session(for: sessionId)
         XCTAssertEqual(assistantMessages(in: session), ["Remote work is complete."])
+        XCTAssertEqual(session?.previewText, "Remote work is complete.")
         XCTAssertEqual(session.flatMap(SessionCompletionKey.make(for:)), firstKey)
 
         await store.process(.sessionArchived(sessionId: sessionId))
@@ -132,9 +133,12 @@ final class RemoteCodexStopCompletionTests: XCTestCase {
 
     func testStopWithoutFinalReplyCompletesNewTurnWithoutReusingEarlierReply() async {
         let store = SessionStore.shared
-        let prompts: [String?] = ["Complete the second task.", nil, "", " \n\t"]
+        let prompts: [(message: String?, expectedPreview: String?)] = [
+            ("Complete the second task.", "Complete the second task."),
+            (nil, nil), ("", nil), (" \n\t", nil)
+        ]
 
-        for prompt in prompts {
+        for (prompt, expectedPreview) in prompts {
             let sessionId = "codex-remote-stop-empty-\(UUID().uuidString)"
             await processPrompt("Complete the first task.", sessionId: sessionId, store: store)
             await processStop("Done.", sessionId: sessionId, store: store)
@@ -142,11 +146,16 @@ final class RemoteCodexStopCompletionTests: XCTestCase {
             let firstKey = firstSession.flatMap(SessionCompletionKey.make(for:))
             XCTAssertNotNil(firstKey)
             await processPrompt(prompt, sessionId: sessionId, store: store)
+            let processing = await store.session(for: sessionId)
+            XCTAssertNil(processing?.previewText)
+            XCTAssertEqual(processing?.lastMessage, expectedPreview)
             await processStop(nil, sessionId: sessionId, store: store)
 
             let session = await store.session(for: sessionId)
             XCTAssertEqual(session?.phase, .idle)
             XCTAssertEqual(session?.lastMessageRole, "user")
+            XCTAssertNil(session?.previewText)
+            XCTAssertEqual(session?.lastMessage, expectedPreview)
             XCTAssertEqual(assistantMessages(in: session), ["Done."])
             XCTAssertTrue(session.map(SessionCompletionStateEvaluator.isCompletedReadySession) ?? false)
             XCTAssertNil(session.flatMap { SessionCompletionPreviewBuilder.latestAssistantText(for: $0) })
@@ -154,6 +163,31 @@ final class RemoteCodexStopCompletionTests: XCTestCase {
             XCTAssertNotNil(completionKey)
             XCTAssertNotEqual(completionKey, firstKey)
 
+            await store.process(.sessionArchived(sessionId: sessionId))
+        }
+    }
+
+    func testMissingPromptDoesNotPairEarlierQuestionWithNewReply() async {
+        let store = SessionStore.shared
+        for prompt in [nil, "", " \n\t"] as [String?] {
+            let sessionId = "codex-remote-missing-question-\(UUID().uuidString)"
+            await processPrompt("Question A", sessionId: sessionId, store: store)
+            await processStop("Reply A", sessionId: sessionId, store: store)
+            await processPrompt(prompt, sessionId: sessionId, store: store)
+            await processStop("Reply B", sessionId: sessionId, store: store)
+
+            let completed = await store.session(for: sessionId)
+            XCTAssertNotNil(completed)
+            XCTAssertNil(completed.flatMap { SessionCompletionPreviewBuilder.latestUserText(for: $0) })
+            XCTAssertEqual(completed.flatMap { SessionCompletionPreviewBuilder.latestAssistantText(for: $0) }, "Reply B")
+            XCTAssertEqual(completed?.conversationInfo.firstUserMessage, "Question A")
+            XCTAssertEqual(assistantMessages(in: completed), ["Reply A", "Reply B"])
+
+            await processPrompt("Question C", sessionId: sessionId, store: store)
+            await processStop("Reply C", sessionId: sessionId, store: store)
+            let next = await store.session(for: sessionId)
+            XCTAssertEqual(next.flatMap { SessionCompletionPreviewBuilder.latestUserText(for: $0) }, "Question C")
+            XCTAssertEqual(next.flatMap { SessionCompletionPreviewBuilder.latestAssistantText(for: $0) }, "Reply C")
             await store.process(.sessionArchived(sessionId: sessionId))
         }
     }

@@ -1208,7 +1208,7 @@ struct NotchView: View {
             uniqueKeysWithValues: instances.map {
                 (
                     SessionCompletionNotificationPolicy.trackingID(for: $0),
-                    (phase: $0.phase, completionKey: SessionCompletionKey.make(for: $0))
+                    SessionCompletionNotificationPolicy.trackingState(for: $0)
                 )
             }
         )
@@ -1227,7 +1227,7 @@ struct NotchView: View {
                 uniqueKeysWithValues: instances.map {
                     (
                         SessionCompletionNotificationPolicy.trackingID(for: $0),
-                        (phase: $0.phase, completionKey: SessionCompletionKey.make(for: $0))
+                        SessionCompletionNotificationPolicy.trackingState(for: $0)
                     )
                 }
             )
@@ -1238,7 +1238,7 @@ struct NotchView: View {
             uniqueKeysWithValues: instances.map {
                 (
                     SessionCompletionNotificationPolicy.trackingID(for: $0),
-                    (phase: $0.phase, completionKey: SessionCompletionKey.make(for: $0))
+                    SessionCompletionNotificationPolicy.trackingState(for: $0)
                 )
             }
         )

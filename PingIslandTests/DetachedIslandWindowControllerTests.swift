@@ -1279,9 +1279,18 @@ final class DetachedIslandWindowControllerTests: XCTestCase {
         }
     }
 
+    func testSuppressedRemoteCodexCompletionDoesNotReplayAfterReconnect() {
+        for phase in [SessionPhase.idle, .processing] {
+            assertSuppressedRemoteCodexStopDoesNotReplay(
+                initialPhase: phase, hookPID: 4242, disconnectBeforeUnmuting: true
+            )
+        }
+    }
+
     private func assertSuppressedRemoteCodexStopDoesNotReplay(
         initialPhase: SessionPhase,
-        hookPID: Int? = nil
+        hookPID: Int? = nil,
+        disconnectBeforeUnmuting: Bool = false
     ) {
         let originalAutoOpenCompletionPanel = AppSettings.autoOpenCompletionPanel
         let originalMuteUntil = AppSettings.temporarilyMuteNotificationsUntil
@@ -1325,21 +1334,55 @@ final class DetachedIslandWindowControllerTests: XCTestCase {
         replay.pid = nil
         controller.applySessionSnapshotForTesting([replay])
 
+        if disconnectBeforeUnmuting {
+            replay.connectionState = .disconnected
+            controller.applySessionSnapshotForTesting([replay])
+            XCTAssertFalse(SessionCompletionStateEvaluator.isCompletedReadySession(replay))
+            XCTAssertNil(SessionCompletionKey.make(for: replay))
+            XCTAssertNil(controller.currentActiveCompletionNotificationForTesting)
+        }
+
         AppSettings.clearReminderNotificationMute()
         XCTAssertFalse(AppSettings.areReminderNotificationsSuppressed)
         controller.applySessionSnapshotForTesting([reply])
         XCTAssertNil(controller.currentActiveCompletionNotificationForTesting)
         XCTAssertEqual(controller.renderedBubbleStateForTesting, .hidden)
         XCTAssertFalse(controller.isBubbleVisibleForTesting)
+        XCTAssertTrue(controller.pendingCompletionNotificationsForTesting.isEmpty)
+
+        if disconnectBeforeUnmuting {
+            // The next turn must still notify after the skipped turn reconnects.
+            var next = reply
+            next.phase = .processing
+            next.hasRemoteCodexTurnCompletion = false
+            next.completionSequence += 1
+            controller.applySessionSnapshotForTesting([next])
+            next.phase = .idle
+            next.hasRemoteCodexTurnCompletion = true
+            controller.applySessionSnapshotForTesting([next])
+            XCTAssertEqual(
+                controller.currentActiveCompletionNotificationForTesting?.identity,
+                SessionCompletionNotification(session: next, kind: .completed).identity
+            )
+        }
     }
 
     func testPresentDoesNotReplayExistingRemoteCodexCompletion() {
+        assertPresentDoesNotReplayRemoteCodexCompletion(connectionState: .connected)
+    }
+
+    func testPresentDoesNotReplayDisconnectedRemoteCodexCompletion() {
+        assertPresentDoesNotReplayRemoteCodexCompletion(connectionState: .disconnected)
+    }
+
+    private func assertPresentDoesNotReplayRemoteCodexCompletion(connectionState: SessionConnectionState) {
         let originalAutoOpenCompletionPanel = AppSettings.autoOpenCompletionPanel
         AppSettings.autoOpenCompletionPanel = true
         defer { AppSettings.autoOpenCompletionPanel = originalAutoOpenCompletionPanel }
 
         var completed = makeCodexCompletedSession(id: "remote-codex-existing-\(UUID().uuidString)")
         completed.ingress = .remoteBridge
+        completed.connectionState = connectionState
         completed.hasRemoteCodexTurnCompletion = true
         let sessionMonitor = makeSessionMonitor()
         sessionMonitor.instances = [completed]
@@ -1351,8 +1394,12 @@ final class DetachedIslandWindowControllerTests: XCTestCase {
         )
         defer { controller.dismiss() }
         controller.present(atPetAnchor: CGPoint(x: 1200, y: 220))
-        for pid in [nil, 4242, nil, 4243] as [Int?] {
+        for (pid, state) in [
+            (nil, SessionConnectionState.connected), (4242, .disconnected),
+            (nil, .connected), (4243, .connected)
+        ] as [(Int?, SessionConnectionState)] {
             completed.pid = pid
+            completed.connectionState = state
             controller.applySessionSnapshotForTesting([completed])
 
             XCTAssertNil(controller.currentActiveCompletionNotificationForTesting)

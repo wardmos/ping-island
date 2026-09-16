@@ -89,12 +89,19 @@ nonisolated struct SessionCompletionNotification: Equatable, Identifiable {
 
 enum SessionCompletionPreviewBuilder {
     static func latestUserText(for session: SessionState) -> String? {
+        let isRemoteCodex = session.provider == .codex && session.ingress == .remoteBridge
         for item in session.chatItems.reversed() {
             if case .user(let text) = item.type {
+                // An empty prompt still advances this boundary without adding
+                // a chat item. Do not pair an older question with the new reply.
+                if isRemoteCodex {
+                    guard let submittedAt = session.conversationInfo.lastUserMessageDate,
+                          item.timestamp >= submittedAt else { return nil }
+                }
                 return sanitized(text)
             }
         }
-        return sanitized(session.firstUserMessage)
+        return isRemoteCodex ? nil : sanitized(session.firstUserMessage)
     }
 
     static func latestAssistantText(for session: SessionState) -> String? {
@@ -247,6 +254,18 @@ final class SessionCompletionNotificationRegistry {
 enum SessionCompletionNotificationPolicy {
     private static let notificationRecencyWindow: TimeInterval = 60
 
+    static func trackingState(
+        for session: SessionState
+    ) -> (phase: SessionPhase, completionKey: SessionCompletionKey?) {
+        var snapshot = session
+        if snapshot.provider == .codex, snapshot.ingress == .remoteBridge {
+            // Losing transport must not erase the observed turn identity.
+            // Notification eligibility still checks the actual connection state.
+            snapshot.connectionState = .connected
+        }
+        return (phase: session.phase, completionKey: SessionCompletionKey.make(for: snapshot))
+    }
+
     static func trackingID(for session: SessionState) -> String {
         // Remote discovery omits the PID that hooks may report or change.
         if session.provider == .codex, session.ingress == .remoteBridge {
@@ -394,7 +413,11 @@ struct SessionCompletionNotificationView: View {
     }
 
     private var userText: String? {
-        SessionCompletionPreviewBuilder.latestUserText(for: session)
+        let text = SessionCompletionPreviewBuilder.latestUserText(for: session)
+        if session.provider == .codex, session.ingress == .remoteBridge {
+            return text
+        }
+        return text ?? session.titleOnlySubagentDisplayTitle
     }
 
     private var assistantText: String? {
@@ -486,15 +509,19 @@ struct SessionCompletionNotificationView: View {
     private var contentCard: some View {
         let content = VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
-                Text(appLocalized: "你：")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundColor(.white.opacity(0.48))
+                if let userText {
+                    Text(appLocalized: "你：")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(.white.opacity(0.48))
 
-                Text(userText ?? session.titleOnlySubagentDisplayTitle)
-                    .font(.system(size: bodyFontSize, weight: .semibold))
-                    .foregroundColor(.white.opacity(0.88))
-                    .lineLimit(2)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    Text(userText)
+                        .font(.system(size: bodyFontSize, weight: .semibold))
+                        .foregroundColor(.white.opacity(0.88))
+                        .lineLimit(2)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                } else {
+                    Spacer(minLength: 0)
+                }
 
                 Text(AppLocalization.string(notification.kind.statusLabelKey))
                     .font(.system(size: 13, weight: .bold))

@@ -1009,6 +1009,10 @@ actor SessionStore {
         if event.event == "UserPromptSubmit" {
             let userMessage = SessionTextSanitizer.sanitizedMessageText(event.message)
             let timestamp = Date()
+            // A new turn invalidates every fallback to the previous reply,
+            // including when the prompt body is absent.
+            session.previewText = nil
+            session.latestHookMessage = userMessage
             if let userMessage {
                 session.chatItems.append(ChatHistoryItem(
                     id: "remote-codex-user-\(UUID().uuidString)",
