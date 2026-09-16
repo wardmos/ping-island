@@ -1187,16 +1187,24 @@ final class DetachedIslandWindowControllerTests: XCTestCase {
     }
 
     func testRemoteCodexEmptyStopOpensOnceAndLateReplyDoesNotReplay() throws {
+        try assertRemoteCodexEmptyStopOpensOnce(initialPhase: .processing)
+    }
+
+    func testRemoteCodexStopAfterIdleSnapshotOpensOnceAndLateReplyDoesNotReplay() throws {
+        try assertRemoteCodexEmptyStopOpensOnce(initialPhase: .idle)
+    }
+
+    private func assertRemoteCodexEmptyStopOpensOnce(initialPhase: SessionPhase) throws {
         let originalAutoOpenCompletionPanel = AppSettings.autoOpenCompletionPanel
         AppSettings.autoOpenCompletionPanel = true
         defer { AppSettings.autoOpenCompletionPanel = originalAutoOpenCompletionPanel }
 
         let sessionId = "remote-codex-late-reply-\(UUID().uuidString)"
-        var processing = makeSession(id: sessionId, phase: .processing, clientInfo: .codexCLI())
-        processing.provider = .codex
-        processing.ingress = .remoteBridge
+        var initial = makeSession(id: sessionId, phase: initialPhase, clientInfo: .codexCLI())
+        initial.provider = .codex
+        initial.ingress = .remoteBridge
         let sessionMonitor = makeSessionMonitor()
-        sessionMonitor.instances = [processing]
+        sessionMonitor.instances = [initial]
         let controller = DetachedIslandWindowController(
             viewModel: makeViewModel(),
             sessionMonitor: sessionMonitor,
@@ -1206,7 +1214,7 @@ final class DetachedIslandWindowControllerTests: XCTestCase {
         defer { controller.dismiss() }
         controller.present(atPetAnchor: CGPoint(x: 1200, y: 220))
 
-        var emptyStop = processing
+        var emptyStop = initial
         emptyStop.phase = .idle
         emptyStop.hasRemoteCodexTurnCompletion = true
         controller.applySessionSnapshotForTesting([emptyStop])
@@ -1238,6 +1246,14 @@ final class DetachedIslandWindowControllerTests: XCTestCase {
     }
 
     func testSuppressedRemoteCodexLateReplyDoesNotReplayAfterUnmuting() {
+        assertSuppressedRemoteCodexStopDoesNotReplay(initialPhase: .processing)
+    }
+
+    func testSuppressedRemoteCodexStopAfterIdleSnapshotDoesNotReplayAfterUnmuting() {
+        assertSuppressedRemoteCodexStopDoesNotReplay(initialPhase: .idle)
+    }
+
+    private func assertSuppressedRemoteCodexStopDoesNotReplay(initialPhase: SessionPhase) {
         let originalAutoOpenCompletionPanel = AppSettings.autoOpenCompletionPanel
         let originalMuteUntil = AppSettings.temporarilyMuteNotificationsUntil
         AppSettings.autoOpenCompletionPanel = true
@@ -1248,11 +1264,11 @@ final class DetachedIslandWindowControllerTests: XCTestCase {
         }
 
         let sessionId = "remote-codex-suppressed-late-reply-\(UUID().uuidString)"
-        var processing = makeSession(id: sessionId, phase: .processing, clientInfo: .codexCLI())
-        processing.provider = .codex
-        processing.ingress = .remoteBridge
+        var initial = makeSession(id: sessionId, phase: initialPhase, clientInfo: .codexCLI())
+        initial.provider = .codex
+        initial.ingress = .remoteBridge
         let sessionMonitor = makeSessionMonitor()
-        sessionMonitor.instances = [processing]
+        sessionMonitor.instances = [initial]
         let controller = DetachedIslandWindowController(
             viewModel: makeViewModel(),
             sessionMonitor: sessionMonitor,
@@ -1261,7 +1277,7 @@ final class DetachedIslandWindowControllerTests: XCTestCase {
         defer { controller.dismiss() }
         controller.present(atPetAnchor: CGPoint(x: 1200, y: 220))
 
-        var emptyStop = processing
+        var emptyStop = initial
         emptyStop.phase = .idle
         emptyStop.hasRemoteCodexTurnCompletion = true
         controller.applySessionSnapshotForTesting([emptyStop])
@@ -1280,6 +1296,30 @@ final class DetachedIslandWindowControllerTests: XCTestCase {
         XCTAssertNil(controller.currentActiveCompletionNotificationForTesting)
         XCTAssertEqual(controller.renderedBubbleStateForTesting, .hidden)
         XCTAssertFalse(controller.isBubbleVisibleForTesting)
+    }
+
+    func testPresentDoesNotReplayExistingRemoteCodexCompletion() {
+        let originalAutoOpenCompletionPanel = AppSettings.autoOpenCompletionPanel
+        AppSettings.autoOpenCompletionPanel = true
+        defer { AppSettings.autoOpenCompletionPanel = originalAutoOpenCompletionPanel }
+
+        var completed = makeCodexCompletedSession(id: "remote-codex-existing-\(UUID().uuidString)")
+        completed.ingress = .remoteBridge
+        completed.hasRemoteCodexTurnCompletion = true
+        let sessionMonitor = makeSessionMonitor()
+        sessionMonitor.instances = [completed]
+        let controller = DetachedIslandWindowController(
+            viewModel: makeViewModel(),
+            sessionMonitor: sessionMonitor,
+            completionNotificationRegistry: SessionCompletionNotificationRegistry(),
+            onClose: {}
+        )
+        defer { controller.dismiss() }
+        controller.present(atPetAnchor: CGPoint(x: 1200, y: 220))
+        controller.applySessionSnapshotForTesting([completed])
+
+        XCTAssertNil(controller.currentActiveCompletionNotificationForTesting)
+        XCTAssertTrue(controller.pendingCompletionNotificationsForTesting.isEmpty)
     }
 
     func testDismissedCodexCompletionDoesNotReopenAfterThreadRefresh() {

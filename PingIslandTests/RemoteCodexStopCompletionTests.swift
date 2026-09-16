@@ -20,6 +20,10 @@ final class RemoteCodexStopCompletionTests: XCTestCase {
         let stopped = try XCTUnwrap(stoppedSession)
         let key = try XCTUnwrap(SessionCompletionKey.make(for: stopped))
         XCTAssertEqual(sounds.edge(for: [stopped])?.event, .taskCompleted)
+        XCTAssertTrue(SessionCompletionNotificationPolicy.shouldQueueCompletedNotification(
+            for: stopped, previousPhase: discovered.phase,
+            previousCompletionKey: SessionCompletionKey.make(for: discovered), isEnabled: true
+        ))
 
         for reply in [nil, "Done.", "Done."] as [String?] {
             await processSnapshot(sessionId: sessionId, store: store)
@@ -33,6 +37,10 @@ final class RemoteCodexStopCompletionTests: XCTestCase {
             let refreshed = try XCTUnwrap(refreshedSession)
             XCTAssertEqual(SessionCompletionKey.make(for: refreshed), key)
             XCTAssertNil(sounds.edge(for: [refreshed]))
+            XCTAssertFalse(SessionCompletionNotificationPolicy.shouldQueueCompletedNotification(
+                for: refreshed, previousPhase: snapshot.phase, previousCompletionKey: key,
+                isEnabled: true
+            ))
         }
 
         await store.process(.sessionArchived(sessionId: sessionId))
@@ -225,6 +233,7 @@ final class RemoteCodexStopCompletionTests: XCTestCase {
             SessionCompletionNotificationPolicy.shouldQueueCompletedNotification(
                 for: $0,
                 previousPhase: session?.phase,
+                previousCompletionKey: emptyStopKey,
                 isEnabled: true
             )
         } ?? true)
@@ -270,7 +279,7 @@ final class RemoteCodexStopCompletionTests: XCTestCase {
                 let refreshed = try XCTUnwrap(refreshedSession)
                 XCTAssertEqual(SessionCompletionKey.make(for: refreshed), key)
                 XCTAssertFalse(SessionCompletionNotificationPolicy.shouldQueueCompletedNotification(
-                    for: refreshed, previousPhase: .idle, isEnabled: true
+                    for: refreshed, previousPhase: .idle, previousCompletionKey: key, isEnabled: true
                 ))
                 XCTAssertNil(sounds.edge(for: [refreshed]))
                 registry.enqueue(SessionCompletionNotification(session: refreshed, kind: .completed))

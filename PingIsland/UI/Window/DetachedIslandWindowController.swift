@@ -184,7 +184,8 @@ final class DetachedIslandWindowController: NSWindowController, NSWindowDelegate
     private var isPetDragActive = false
     private var isPetInNotchZone = false
     private var isPetSecondaryClickArmed = false
-    private var previousCompletionNotificationPhases: [String: SessionPhase] = [:]
+    private var previousCompletionNotificationStates:
+        [String: (phase: SessionPhase, completionKey: SessionCompletionKey?)] = [:]
     private let completionNotificationRegistry: SessionCompletionNotificationRegistry
     private var completionNotificationQueue: [SessionCompletionNotification] {
         completionNotificationRegistry.pendingNotifications
@@ -1628,8 +1629,10 @@ final class DetachedIslandWindowController: NSWindowController, NSWindowDelegate
     }
 
     private func primeCompletionNotificationTracking(_ instances: [SessionState]) {
-        previousCompletionNotificationPhases = Dictionary(
-            uniqueKeysWithValues: instances.map { ($0.stableId, $0.phase) }
+        previousCompletionNotificationStates = Dictionary(
+            uniqueKeysWithValues: instances.map {
+                ($0.stableId, (phase: $0.phase, completionKey: SessionCompletionKey.make(for: $0)))
+            }
         )
         synchronizeCompletionNotifications()
     }
@@ -1642,21 +1645,25 @@ final class DetachedIslandWindowController: NSWindowController, NSWindowDelegate
                 clearCompletionNotifications(keepBubbleOpen: false)
             }
 
-            previousCompletionNotificationPhases = Dictionary(
-                uniqueKeysWithValues: instances.map { ($0.stableId, $0.phase) }
+            previousCompletionNotificationStates = Dictionary(
+                uniqueKeysWithValues: instances.map {
+                    ($0.stableId, (phase: $0.phase, completionKey: SessionCompletionKey.make(for: $0)))
+                }
             )
             return
         }
 
-        let currentPhases = Dictionary(
-            uniqueKeysWithValues: instances.map { ($0.stableId, $0.phase) }
+        let currentStates = Dictionary(
+            uniqueKeysWithValues: instances.map {
+                ($0.stableId, (phase: $0.phase, completionKey: SessionCompletionKey.make(for: $0)))
+            }
         )
 
         let newNotifications = instances
             .compactMap { session -> SessionCompletionNotification? in
                 completionNotificationCandidate(
                     for: session,
-                    previousPhase: previousCompletionNotificationPhases[session.stableId]
+                    previousPhase: previousCompletionNotificationStates[session.stableId]?.phase
                 )
             }
             .sorted { $0.session.lastActivity < $1.session.lastActivity }
@@ -1665,7 +1672,7 @@ final class DetachedIslandWindowController: NSWindowController, NSWindowDelegate
             enqueueCompletionNotification(notification)
         }
 
-        previousCompletionNotificationPhases = currentPhases
+        previousCompletionNotificationStates = currentStates
         maybePresentNextCompletionNotification()
     }
 
@@ -1695,6 +1702,7 @@ final class DetachedIslandWindowController: NSWindowController, NSWindowDelegate
         SessionCompletionNotificationPolicy.shouldQueueCompletedNotification(
             for: session,
             previousPhase: previousPhase,
+            previousCompletionKey: previousCompletionNotificationStates[session.stableId]?.completionKey,
             isEnabled: AppSettings.autoOpenCompletionPanel
         )
     }

@@ -250,6 +250,7 @@ enum SessionCompletionNotificationPolicy {
     static func shouldQueueCompletedNotification(
         for session: SessionState,
         previousPhase: SessionPhase?,
+        previousCompletionKey: SessionCompletionKey? = nil,
         isEnabled: Bool,
         now: Date = Date()
     ) -> Bool {
@@ -257,8 +258,13 @@ enum SessionCompletionNotificationPolicy {
         guard SessionCompletionStateEvaluator.isCompletedReadySession(session) else { return false }
 
         if session.provider == .codex {
-            guard session.phase == .idle else { return false }
-            guard let previousPhase, isCodexCompletionSourcePhase(previousPhase) else {
+            guard session.phase == .idle, let previousPhase else { return false }
+            if session.ingress == .remoteBridge, previousPhase == .idle {
+                // Discovery and Stop can both be idle; only a new Stop key queues a popup.
+                guard SessionCompletionKey.make(for: session) != previousCompletionKey else {
+                    return false
+                }
+            } else if !isCodexCompletionSourcePhase(previousPhase) {
                 return false
             }
             return wasTrackedOrRecentlyCreated(session, previousPhase: previousPhase, now: now)

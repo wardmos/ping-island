@@ -459,9 +459,14 @@ final class SessionCompletionStateEvaluatorTests: XCTestCase {
         XCTAssertTrue(SessionCompletionNotificationPolicy.shouldQueueCompletedNotification(
             for: session, previousPhase: .processing, isEnabled: true, now: now
         ))
-        XCTAssertFalse(SessionCompletionNotificationPolicy.shouldQueueCompletedNotification(
-            for: session, previousPhase: nil, isEnabled: true, now: now
+        XCTAssertTrue(SessionCompletionNotificationPolicy.shouldQueueCompletedNotification(
+            for: session, previousPhase: .idle, isEnabled: true, now: now
         ))
+        for previousPhase in [nil, .compacting, .ended] as [SessionPhase?] {
+            XCTAssertFalse(SessionCompletionNotificationPolicy.shouldQueueCompletedNotification(
+                for: session, previousPhase: previousPhase, isEnabled: true, now: now
+            ))
+        }
         XCTAssertFalse(SessionCompletionNotificationPolicy.shouldQueueCompletedNotification(
             for: session, previousPhase: .processing, isEnabled: false, now: now
         ))
@@ -473,7 +478,14 @@ final class SessionCompletionStateEvaluatorTests: XCTestCase {
         )
         XCTAssertEqual(SessionCompletionKey.make(for: session), completionKey)
         XCTAssertFalse(SessionCompletionNotificationPolicy.shouldQueueCompletedNotification(
-            for: session, previousPhase: .idle, isEnabled: true, now: now
+            for: session, previousPhase: .idle, previousCompletionKey: completionKey,
+            isEnabled: true, now: now
+        ))
+
+        session.completionSequence += 1
+        XCTAssertTrue(SessionCompletionNotificationPolicy.shouldQueueCompletedNotification(
+            for: session, previousPhase: .idle, previousCompletionKey: completionKey,
+            isEnabled: true, now: now
         ))
 
         session.lastActivity = now.addingTimeInterval(-120)
