@@ -1631,7 +1631,10 @@ final class DetachedIslandWindowController: NSWindowController, NSWindowDelegate
     private func primeCompletionNotificationTracking(_ instances: [SessionState]) {
         previousCompletionNotificationStates = Dictionary(
             uniqueKeysWithValues: instances.map {
-                ($0.stableId, (phase: $0.phase, completionKey: SessionCompletionKey.make(for: $0)))
+                (
+                    SessionCompletionNotificationPolicy.trackingID(for: $0),
+                    (phase: $0.phase, completionKey: SessionCompletionKey.make(for: $0))
+                )
             }
         )
         synchronizeCompletionNotifications()
@@ -1647,7 +1650,10 @@ final class DetachedIslandWindowController: NSWindowController, NSWindowDelegate
 
             previousCompletionNotificationStates = Dictionary(
                 uniqueKeysWithValues: instances.map {
-                    ($0.stableId, (phase: $0.phase, completionKey: SessionCompletionKey.make(for: $0)))
+                    (
+                        SessionCompletionNotificationPolicy.trackingID(for: $0),
+                        (phase: $0.phase, completionKey: SessionCompletionKey.make(for: $0))
+                    )
                 }
             )
             return
@@ -1655,7 +1661,10 @@ final class DetachedIslandWindowController: NSWindowController, NSWindowDelegate
 
         let currentStates = Dictionary(
             uniqueKeysWithValues: instances.map {
-                ($0.stableId, (phase: $0.phase, completionKey: SessionCompletionKey.make(for: $0)))
+                (
+                    SessionCompletionNotificationPolicy.trackingID(for: $0),
+                    (phase: $0.phase, completionKey: SessionCompletionKey.make(for: $0))
+                )
             }
         )
 
@@ -1663,7 +1672,9 @@ final class DetachedIslandWindowController: NSWindowController, NSWindowDelegate
             .compactMap { session -> SessionCompletionNotification? in
                 completionNotificationCandidate(
                     for: session,
-                    previousPhase: previousCompletionNotificationStates[session.stableId]?.phase
+                    previousPhase: previousCompletionNotificationStates[
+                        SessionCompletionNotificationPolicy.trackingID(for: session)
+                    ]?.phase
                 )
             }
             .sorted { $0.session.lastActivity < $1.session.lastActivity }
@@ -1702,7 +1713,9 @@ final class DetachedIslandWindowController: NSWindowController, NSWindowDelegate
         SessionCompletionNotificationPolicy.shouldQueueCompletedNotification(
             for: session,
             previousPhase: previousPhase,
-            previousCompletionKey: previousCompletionNotificationStates[session.stableId]?.completionKey,
+            previousCompletionKey: previousCompletionNotificationStates[
+                SessionCompletionNotificationPolicy.trackingID(for: session)
+            ]?.completionKey,
             isEnabled: AppSettings.autoOpenCompletionPanel
         )
     }

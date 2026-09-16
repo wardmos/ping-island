@@ -1194,7 +1194,16 @@ final class DetachedIslandWindowControllerTests: XCTestCase {
         try assertRemoteCodexEmptyStopOpensOnce(initialPhase: .idle)
     }
 
-    private func assertRemoteCodexEmptyStopOpensOnce(initialPhase: SessionPhase) throws {
+    func testRemoteCodexPIDChangesDoNotLoseOrReplayCompletion() throws {
+        for phase in [SessionPhase.idle, .processing] {
+            try assertRemoteCodexEmptyStopOpensOnce(initialPhase: phase, hookPID: 4242)
+        }
+    }
+
+    private func assertRemoteCodexEmptyStopOpensOnce(
+        initialPhase: SessionPhase,
+        hookPID: Int? = nil
+    ) throws {
         let originalAutoOpenCompletionPanel = AppSettings.autoOpenCompletionPanel
         AppSettings.autoOpenCompletionPanel = true
         defer { AppSettings.autoOpenCompletionPanel = originalAutoOpenCompletionPanel }
@@ -1203,6 +1212,7 @@ final class DetachedIslandWindowControllerTests: XCTestCase {
         var initial = makeSession(id: sessionId, phase: initialPhase, clientInfo: .codexCLI())
         initial.provider = .codex
         initial.ingress = .remoteBridge
+        initial.pid = initialPhase == .processing ? hookPID : nil
         let sessionMonitor = makeSessionMonitor()
         sessionMonitor.instances = [initial]
         let controller = DetachedIslandWindowController(
@@ -1214,8 +1224,15 @@ final class DetachedIslandWindowControllerTests: XCTestCase {
         defer { controller.dismiss() }
         controller.present(atPetAnchor: CGPoint(x: 1200, y: 220))
 
-        var emptyStop = initial
+        // Discovery snapshots omit the PID carried by real remote hooks.
+        var snapshot = initial
+        snapshot.pid = nil
+        controller.applySessionSnapshotForTesting([snapshot])
+        XCTAssertNil(controller.currentActiveCompletionNotificationForTesting)
+
+        var emptyStop = snapshot
         emptyStop.phase = .idle
+        emptyStop.pid = hookPID
         emptyStop.hasRemoteCodexTurnCompletion = true
         controller.applySessionSnapshotForTesting([emptyStop])
         let notification = try XCTUnwrap(controller.currentActiveCompletionNotificationForTesting)
@@ -1226,8 +1243,11 @@ final class DetachedIslandWindowControllerTests: XCTestCase {
         var reply = makeCodexCompletedSession(id: sessionId)
         reply.clientInfo = .codexCLI()
         reply.ingress = .remoteBridge
+        reply.pid = hookPID.map { $0 + 1 }
         reply.hasRemoteCodexTurnCompletion = true
-        controller.applySessionSnapshotForTesting([reply])
+        var replay = reply
+        replay.pid = nil
+        controller.applySessionSnapshotForTesting([replay])
         XCTAssertEqual(controller.currentActiveCompletionNotificationForTesting?.id, notification.id)
         XCTAssertNil(controller.currentActiveCompletionNotificationForTesting?.session.lastMessage)
         XCTAssertTrue(controller.pendingCompletionNotificationsForTesting.isEmpty)
@@ -1253,7 +1273,16 @@ final class DetachedIslandWindowControllerTests: XCTestCase {
         assertSuppressedRemoteCodexStopDoesNotReplay(initialPhase: .idle)
     }
 
-    private func assertSuppressedRemoteCodexStopDoesNotReplay(initialPhase: SessionPhase) {
+    func testSuppressedRemoteCodexCompletionDoesNotReplayAcrossPIDChanges() {
+        for phase in [SessionPhase.idle, .processing] {
+            assertSuppressedRemoteCodexStopDoesNotReplay(initialPhase: phase, hookPID: 4242)
+        }
+    }
+
+    private func assertSuppressedRemoteCodexStopDoesNotReplay(
+        initialPhase: SessionPhase,
+        hookPID: Int? = nil
+    ) {
         let originalAutoOpenCompletionPanel = AppSettings.autoOpenCompletionPanel
         let originalMuteUntil = AppSettings.temporarilyMuteNotificationsUntil
         AppSettings.autoOpenCompletionPanel = true
@@ -1279,6 +1308,7 @@ final class DetachedIslandWindowControllerTests: XCTestCase {
 
         var emptyStop = initial
         emptyStop.phase = .idle
+        emptyStop.pid = hookPID
         emptyStop.hasRemoteCodexTurnCompletion = true
         controller.applySessionSnapshotForTesting([emptyStop])
         XCTAssertNil(controller.currentActiveCompletionNotificationForTesting)
@@ -1286,9 +1316,14 @@ final class DetachedIslandWindowControllerTests: XCTestCase {
         var reply = makeCodexCompletedSession(id: sessionId)
         reply.clientInfo = .codexCLI()
         reply.ingress = .remoteBridge
+        reply.pid = hookPID.map { $0 + 1 }
         reply.hasRemoteCodexTurnCompletion = true
         controller.applySessionSnapshotForTesting([reply])
         XCTAssertNil(controller.currentActiveCompletionNotificationForTesting)
+
+        var replay = reply
+        replay.pid = nil
+        controller.applySessionSnapshotForTesting([replay])
 
         AppSettings.clearReminderNotificationMute()
         XCTAssertFalse(AppSettings.areReminderNotificationsSuppressed)
@@ -1316,10 +1351,13 @@ final class DetachedIslandWindowControllerTests: XCTestCase {
         )
         defer { controller.dismiss() }
         controller.present(atPetAnchor: CGPoint(x: 1200, y: 220))
-        controller.applySessionSnapshotForTesting([completed])
+        for pid in [nil, 4242, nil, 4243] as [Int?] {
+            completed.pid = pid
+            controller.applySessionSnapshotForTesting([completed])
 
-        XCTAssertNil(controller.currentActiveCompletionNotificationForTesting)
-        XCTAssertTrue(controller.pendingCompletionNotificationsForTesting.isEmpty)
+            XCTAssertNil(controller.currentActiveCompletionNotificationForTesting)
+            XCTAssertTrue(controller.pendingCompletionNotificationsForTesting.isEmpty)
+        }
     }
 
     func testDismissedCodexCompletionDoesNotReopenAfterThreadRefresh() {

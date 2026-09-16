@@ -247,6 +247,14 @@ final class SessionCompletionNotificationRegistry {
 enum SessionCompletionNotificationPolicy {
     private static let notificationRecencyWindow: TimeInterval = 60
 
+    static func trackingID(for session: SessionState) -> String {
+        // Remote discovery omits the PID that hooks may report or change.
+        if session.provider == .codex, session.ingress == .remoteBridge {
+            return session.sessionId
+        }
+        return session.stableId
+    }
+
     static func shouldQueueCompletedNotification(
         for session: SessionState,
         previousPhase: SessionPhase?,
