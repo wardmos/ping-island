@@ -613,6 +613,21 @@ actor SessionStore {
             : inferredPhase
         if wasCompletedReady, newPhase == .processing {
             session.completionSequence &+= 1
+            if event.provider == .codex, event.ingress == .remoteBridge,
+               event.event != "UserPromptSubmit" {
+                // Tool activity can start a turn whose prompt hook was lost.
+                // Retain history, but discard the previous turn's preview fields.
+                session.previewText = nil
+                session.latestHookMessage = Self.normalizedHookMessage(event.message)
+                session.conversationInfo = ConversationInfo(
+                    summary: session.conversationInfo.summary,
+                    lastMessage: nil,
+                    lastMessageRole: nil,
+                    lastToolName: nil,
+                    firstUserMessage: session.conversationInfo.firstUserMessage,
+                    lastUserMessageDate: nil
+                )
+            }
         }
         let intervention = codeBuddyCLINotificationIntervention ?? event.intervention
         let shouldPreserveQwenQuestionIntervention = shouldPreserveQwenQuestionIntervention(
