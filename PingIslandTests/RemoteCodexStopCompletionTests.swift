@@ -3,6 +3,73 @@ import XCTest
 @testable import Ping_Island
 
 final class RemoteCodexStopCompletionTests: XCTestCase {
+    func testEmptyStopAfterSnapshotDiscoveryCompletesOnceWithoutPrompt() async throws {
+        let sessionId = "codex-remote-snapshot-stop-\(UUID().uuidString)"
+        let store = SessionStore.shared
+        var sounds = SessionSoundEdgeTracker()
+        sounds.prime(with: [])
+
+        await processSnapshot(sessionId: sessionId, store: store)
+        let discoveredSession = await store.session(for: sessionId)
+        let discovered = try XCTUnwrap(discoveredSession)
+        XCTAssertNil(SessionCompletionKey.make(for: discovered))
+        XCTAssertNotEqual(sounds.edge(for: [discovered])?.event, .taskCompleted)
+
+        await processStop(nil, sessionId: sessionId, store: store)
+        let stoppedSession = await store.session(for: sessionId)
+        let stopped = try XCTUnwrap(stoppedSession)
+        let key = try XCTUnwrap(SessionCompletionKey.make(for: stopped))
+        XCTAssertEqual(sounds.edge(for: [stopped])?.event, .taskCompleted)
+
+        for reply in [nil, "Done.", "Done."] as [String?] {
+            await processSnapshot(sessionId: sessionId, store: store)
+            let snapshotSession = await store.session(for: sessionId)
+            let snapshot = try XCTUnwrap(snapshotSession)
+            XCTAssertEqual(SessionCompletionKey.make(for: snapshot), key)
+            XCTAssertNil(sounds.edge(for: [snapshot]))
+
+            await processStop(reply, sessionId: sessionId, store: store)
+            let refreshedSession = await store.session(for: sessionId)
+            let refreshed = try XCTUnwrap(refreshedSession)
+            XCTAssertEqual(SessionCompletionKey.make(for: refreshed), key)
+            XCTAssertNil(sounds.edge(for: [refreshed]))
+        }
+
+        await store.process(.sessionArchived(sessionId: sessionId))
+    }
+
+    func testTranscriptEnrichmentPreservesStopAfterSnapshotDiscovery() async throws {
+        let sessionId = "codex-remote-snapshot-enrichment-\(UUID().uuidString)"
+        let store = SessionStore.shared
+        await processSnapshot(sessionId: sessionId, store: store)
+        let originalSession = await store.session(for: sessionId)
+        let original = try XCTUnwrap(originalSession)
+
+        await processStop(nil, sessionId: sessionId, store: store)
+        let stopped = await store.session(for: sessionId)
+        let key = try XCTUnwrap(stopped.flatMap(SessionCompletionKey.make(for:)))
+        let committed = await store.commitTranscriptUpdate(original, basedOn: original)
+        XCTAssertEqual(committed.flatMap(SessionCompletionKey.make(for:)), key)
+
+        await store.process(.sessionArchived(sessionId: sessionId))
+    }
+
+    func testTranscriptEnrichmentDoesNotRestoreStopDuringNewTurn() async throws {
+        let sessionId = "codex-remote-new-turn-enrichment-\(UUID().uuidString)"
+        let store = SessionStore.shared
+        await processStop(nil, sessionId: sessionId, store: store)
+        let originalSession = await store.session(for: sessionId)
+        let original = try XCTUnwrap(originalSession)
+
+        await processPrompt(nil, sessionId: sessionId, store: store)
+        let committed = await store.commitTranscriptUpdate(original, basedOn: original)
+        XCTAssertEqual(committed?.phase, .processing)
+        XCTAssertEqual(committed?.hasRemoteCodexTurnCompletion, false)
+        XCTAssertNil(committed.flatMap(SessionCompletionKey.make(for:)))
+
+        await store.process(.sessionArchived(sessionId: sessionId))
+    }
+
     func testStopPromotesFinalReplyAndCompletesTurn() async {
         let sessionId = "codex-remote-stop-\(UUID().uuidString)"
         let store = SessionStore.shared
@@ -55,7 +122,7 @@ final class RemoteCodexStopCompletionTests: XCTestCase {
         await store.process(.sessionArchived(sessionId: sessionId))
     }
 
-    func testStopWithoutFinalReplyDoesNotReuseEarlierCompletion() async {
+    func testStopWithoutFinalReplyCompletesNewTurnWithoutReusingEarlierReply() async {
         let store = SessionStore.shared
         let prompts: [String?] = ["Complete the second task.", nil, "", " \n\t"]
 
@@ -63,6 +130,9 @@ final class RemoteCodexStopCompletionTests: XCTestCase {
             let sessionId = "codex-remote-stop-empty-\(UUID().uuidString)"
             await processPrompt("Complete the first task.", sessionId: sessionId, store: store)
             await processStop("Done.", sessionId: sessionId, store: store)
+            let firstSession = await store.session(for: sessionId)
+            let firstKey = firstSession.flatMap(SessionCompletionKey.make(for:))
+            XCTAssertNotNil(firstKey)
             await processPrompt(prompt, sessionId: sessionId, store: store)
             await processStop(nil, sessionId: sessionId, store: store)
 
@@ -70,8 +140,11 @@ final class RemoteCodexStopCompletionTests: XCTestCase {
             XCTAssertEqual(session?.phase, .idle)
             XCTAssertEqual(session?.lastMessageRole, "user")
             XCTAssertEqual(assistantMessages(in: session), ["Done."])
-            XCTAssertFalse(session.map(SessionCompletionStateEvaluator.isCompletedReadySession) ?? true)
-            XCTAssertNil(session.flatMap(SessionCompletionKey.make(for:)))
+            XCTAssertTrue(session.map(SessionCompletionStateEvaluator.isCompletedReadySession) ?? false)
+            XCTAssertNil(session.flatMap { SessionCompletionPreviewBuilder.latestAssistantText(for: $0) })
+            let completionKey = session.flatMap(SessionCompletionKey.make(for:))
+            XCTAssertNotNil(completionKey)
+            XCTAssertNotEqual(completionKey, firstKey)
 
             await store.process(.sessionArchived(sessionId: sessionId))
         }
@@ -121,35 +194,93 @@ final class RemoteCodexStopCompletionTests: XCTestCase {
                 tool: "shell"
             )))
         }
+        let activeSession = await store.session(for: sessionId)
+        XCTAssertEqual(activeSession?.hasRemoteCodexTurnCompletion, false)
         await processStop(nil, sessionId: sessionId, store: store)
 
         let session = await store.session(for: sessionId)
         XCTAssertEqual(session?.phase, .idle)
         XCTAssertEqual(assistantMessages(in: session), ["Done."])
-        XCTAssertFalse(session.map(SessionCompletionStateEvaluator.isCompletedReadySession) ?? true)
-        XCTAssertNil(session.flatMap(SessionCompletionKey.make(for:)))
-        XCTAssertFalse(session.map {
+        XCTAssertTrue(session.map(SessionCompletionStateEvaluator.isCompletedReadySession) ?? false)
+        XCTAssertNil(session.flatMap { SessionCompletionPreviewBuilder.latestAssistantText(for: $0) })
+        let emptyStopKey = session.flatMap(SessionCompletionKey.make(for:))
+        XCTAssertNotNil(emptyStopKey)
+        XCTAssertNotEqual(emptyStopKey, firstKey)
+        XCTAssertTrue(session.map {
             SessionCompletionNotificationPolicy.shouldQueueCompletedNotification(
                 for: $0, previousPhase: .processing, isEnabled: true
             )
-        } ?? true)
+        } ?? false)
 
-        // A delayed final reply still completes this turn, even if the text repeats.
+        // A delayed final reply enriches the completed turn without changing its identity.
         await processStop("Done.", sessionId: sessionId, store: store)
         let completedSession = await store.session(for: sessionId)
         XCTAssertEqual(assistantMessages(in: completedSession), ["Done.", "Done."])
+        XCTAssertEqual(completedSession.flatMap { SessionCompletionPreviewBuilder.latestAssistantText(for: $0) }, "Done.")
         let completionKey = completedSession.flatMap(SessionCompletionKey.make(for:))
         XCTAssertNotNil(completionKey)
         XCTAssertNotEqual(completionKey, firstKey)
-        XCTAssertTrue(completedSession.map {
+        XCTAssertEqual(completionKey, emptyStopKey)
+        XCTAssertFalse(completedSession.map {
             SessionCompletionNotificationPolicy.shouldQueueCompletedNotification(
                 for: $0,
                 previousPhase: session?.phase,
-                wasCompletedReady: session.map(SessionCompletionStateEvaluator.isCompletedReadySession),
                 isEnabled: true
             )
-        } ?? false)
+        } ?? true)
 
+        await store.process(.sessionArchived(sessionId: sessionId))
+    }
+
+    @MainActor
+    func testEmptyStopsNotifyOncePerTurnAndLateRepliesDoNotReplay() async throws {
+        let sessionId = "codex-remote-empty-stop-notifications-\(UUID().uuidString)"
+        let store = SessionStore.shared
+        let registry = SessionCompletionNotificationRegistry()
+        var sounds = SessionSoundEdgeTracker()
+        var previousKey: SessionCompletionKey?
+
+        for turn in 1...2 {
+            await processPrompt("Complete task \(turn).", sessionId: sessionId, store: store)
+            let processingSession = await store.session(for: sessionId)
+            let processing = try XCTUnwrap(processingSession)
+            XCTAssertFalse(processing.hasRemoteCodexTurnCompletion)
+            if turn == 1 {
+                sounds.prime(with: [processing])
+            } else {
+                _ = sounds.edge(for: [processing])
+            }
+
+            await processStop(nil, sessionId: sessionId, store: store)
+            let stoppedSession = await store.session(for: sessionId)
+            let stopped = try XCTUnwrap(stoppedSession)
+            let key = try XCTUnwrap(SessionCompletionKey.make(for: stopped))
+            XCTAssertNotEqual(key, previousKey)
+            XCTAssertTrue(SessionCompletionNotificationPolicy.shouldQueueCompletedNotification(
+                for: stopped, previousPhase: processing.phase, isEnabled: true
+            ))
+            XCTAssertEqual(sounds.edge(for: [stopped])?.event, .taskCompleted)
+            registry.enqueue(SessionCompletionNotification(session: stopped, kind: .completed))
+            let notification = try XCTUnwrap(registry.dequeueNext())
+            XCTAssertEqual(notification.identity, .completed(key))
+
+            for reply in [nil, "Done.", "Done."] as [String?] {
+                await processStop(reply, sessionId: sessionId, store: store)
+                let refreshedSession = await store.session(for: sessionId)
+                let refreshed = try XCTUnwrap(refreshedSession)
+                XCTAssertEqual(SessionCompletionKey.make(for: refreshed), key)
+                XCTAssertFalse(SessionCompletionNotificationPolicy.shouldQueueCompletedNotification(
+                    for: refreshed, previousPhase: .idle, isEnabled: true
+                ))
+                XCTAssertNil(sounds.edge(for: [refreshed]))
+                registry.enqueue(SessionCompletionNotification(session: refreshed, kind: .completed))
+                XCTAssertNil(registry.dequeueNext())
+            }
+            previousKey = key
+        }
+
+        let session = await store.session(for: sessionId)
+        XCTAssertEqual(assistantMessages(in: session), ["Done.", "Done."])
         await store.process(.sessionArchived(sessionId: sessionId))
     }
 
@@ -221,6 +352,15 @@ final class RemoteCodexStopCompletionTests: XCTestCase {
             event: "UserPromptSubmit",
             status: "processing",
             message: message
+        )))
+    }
+
+    private func processSnapshot(sessionId: String, store: SessionStore) async {
+        await store.process(.hookReceived(makeEvent(
+            sessionId: sessionId,
+            event: "RemoteCodexThreadUpdated",
+            status: "idle",
+            message: "Remote task snapshot"
         )))
     }
 

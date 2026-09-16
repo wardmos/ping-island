@@ -46,6 +46,33 @@ final class SessionCompletionPreviewBuilderTests: XCTestCase {
         XCTAssertEqual(SessionCompletionPreviewBuilder.latestAssistantText(for: session), "最终 结果")
     }
 
+    func testRemoteCodexEmptyStopDoesNotPreviewAnEarlierReply() {
+        for role in [nil, "user"] as [String?] {
+            let session = SessionState(
+                sessionId: "remote-completion-preview",
+                cwd: "/tmp/project",
+                provider: .codex,
+                clientInfo: .codexCLI(),
+                ingress: .remoteBridge,
+                previewText: "Previous result",
+                phase: .idle,
+                chatItems: [
+                    ChatHistoryItem(id: "old-reply", type: .assistant("Previous result"), timestamp: Date())
+                ],
+                conversationInfo: ConversationInfo(
+                    summary: nil, lastMessage: nil, lastMessageRole: role,
+                    lastToolName: nil, firstUserMessage: nil, lastUserMessageDate: nil
+                ),
+                hasRemoteCodexTurnCompletion: true
+            )
+
+            XCTAssertTrue(SessionCompletionStateEvaluator.isCompletedReadySession(session))
+            XCTAssertNil(SessionCompletionPreviewBuilder.latestAssistantText(
+                for: session, notificationKind: .completed
+            ))
+        }
+    }
+
     func testCompactedNotificationSuppressesAssistantPreview() {
         let session = SessionState(
             sessionId: "completion-preview-compacted",

@@ -15,6 +15,27 @@ final class RemoteCodexSnapshotPhaseTests: XCTestCase {
         await store.process(.sessionArchived(sessionId: sessionId))
     }
 
+    func testSnapshotDiscoveryAndReplayDoNotAnnounceCompletion() async throws {
+        let sessionId = "codex-remote-snapshot-sound-\(UUID().uuidString)"
+        let store = SessionStore.shared
+        var sounds = SessionSoundEdgeTracker()
+        sounds.prime(with: [])
+
+        for _ in 0..<2 {
+            await store.process(.hookReceived(makeSnapshot(sessionId: sessionId)))
+            let storedSession = await store.session(for: sessionId)
+            let session = try XCTUnwrap(storedSession)
+
+            XCTAssertEqual(session.phase, .idle)
+            XCTAssertFalse(session.shouldHideFromPrimaryUI)
+            XCTAssertFalse(SessionCompletionStateEvaluator.isCompletedReadySession(session))
+            XCTAssertNil(SessionCompletionKey.make(for: session))
+            XCTAssertNotEqual(sounds.edge(for: [session])?.event, .taskCompleted)
+        }
+
+        await store.process(.sessionArchived(sessionId: sessionId))
+    }
+
     func testSnapshotPreservesExistingLifecyclePhase() async {
         let store = SessionStore.shared
         let cases: [(name: String, phase: SessionPhase)] = [
