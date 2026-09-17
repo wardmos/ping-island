@@ -1186,11 +1186,11 @@ final class DetachedIslandWindowControllerTests: XCTestCase {
         wait(for: [presented], timeout: 1.0)
     }
 
-    func testRemoteCodexEmptyStopOpensOnceAndLateReplyDoesNotReplay() {
+    func testRemoteCodexEmptyStopOpensOnceAndLateReplyDoesNotReplay() throws {
         for phase in [SessionPhase.idle, .processing] {
             for pid in [nil, 4242] as [Int?] {
-                XCTContext.runActivity(named: "phase: \(phase), PID: \(String(describing: pid))") { _ in
-                    XCTAssertNoThrow(try assertRemoteCodexEmptyStopOpensOnce(initialPhase: phase, hookPID: pid))
+                try XCTContext.runActivity(named: "phase: \(phase), PID: \(String(describing: pid))") { _ in
+                    try assertRemoteCodexEmptyStopOpensOnce(initialPhase: phase, hookPID: pid)
                 }
             }
         }
