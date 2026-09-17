@@ -441,6 +441,25 @@ final class SessionCompletionStateEvaluatorTests: XCTestCase {
         XCTAssertNil(SessionCompletionKey.make(for: session))
     }
 
+    func testRemoteCodexEmptyStopDoesNotPreviewAnEarlierReply() {
+        for role in [nil, "user"] as [String?] {
+            var session = makeCodexCompletedSession(now: Date())
+            session.clientInfo = .codexCLI()
+            session.ingress = .remoteBridge
+            session.previewText = "Previous result"
+            session.hasRemoteCodexTurnCompletion = true
+            session.conversationInfo = ConversationInfo(
+                summary: nil, lastMessage: nil, lastMessageRole: role,
+                lastToolName: nil, firstUserMessage: nil, lastUserMessageDate: nil
+            )
+
+            XCTAssertTrue(SessionCompletionStateEvaluator.isCompletedReadySession(session))
+            XCTAssertNil(SessionCompletionPreviewBuilder.latestAssistantText(
+                for: session, notificationKind: .completed
+            ))
+        }
+    }
+
     func testRemoteCodexCompletionDoesNotWaitForReplyOrRequeueAfterEnrichment() {
         let now = Date()
         var session = makeCodexCompletedSession(now: now)

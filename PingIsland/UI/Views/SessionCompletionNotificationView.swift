@@ -254,6 +254,14 @@ final class SessionCompletionNotificationRegistry {
 enum SessionCompletionNotificationPolicy {
     private static let notificationRecencyWindow: TimeInterval = 60
 
+    static func trackingStates(
+        for sessions: [SessionState]
+    ) -> [String: (phase: SessionPhase, completionKey: SessionCompletionKey?)] {
+        Dictionary(uniqueKeysWithValues: sessions.map {
+            (trackingID(for: $0), trackingState(for: $0))
+        })
+    }
+
     static func trackingState(
         for session: SessionState
     ) -> (phase: SessionPhase, completionKey: SessionCompletionKey?) {

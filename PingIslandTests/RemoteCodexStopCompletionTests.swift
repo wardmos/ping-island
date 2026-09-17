@@ -7,34 +7,41 @@ final class RemoteCodexStopCompletionTests: XCTestCase {
     private let store = SessionStore.shared
 
     func testEmptyStopAfterSnapshotDiscoveryCompletesOnceWithoutPrompt() async throws {
-        let sessionId = makeSessionID()
-        var sounds = SessionSoundEdgeTracker()
-        sounds.prime(with: [])
+        for status in ["idle", "processing"] {
+            let sessionId = makeSessionID()
+            var sounds = SessionSoundEdgeTracker()
+            sounds.prime(with: [])
 
-        let discovered = try await processSnapshot(sessionId: sessionId)
-        XCTAssertNil(SessionCompletionKey.make(for: discovered))
-        XCTAssertNotEqual(sounds.edge(for: [discovered])?.event, .taskCompleted)
+            let discovered = try await processSnapshot(sessionId: sessionId, status: status)
+            for snapshot in [discovered, try await processSnapshot(sessionId: sessionId, status: status)] {
+                XCTAssertEqual(snapshot.phase, .idle)
+                XCTAssertFalse(snapshot.shouldHideFromPrimaryUI)
+                XCTAssertFalse(SessionCompletionStateEvaluator.isCompletedReadySession(snapshot))
+                XCTAssertNil(SessionCompletionKey.make(for: snapshot))
+                XCTAssertNotEqual(sounds.edge(for: [snapshot])?.event, .taskCompleted)
+            }
 
-        let stopped = try await processStop(nil, sessionId: sessionId)
-        let key = try XCTUnwrap(SessionCompletionKey.make(for: stopped))
-        XCTAssertEqual(sounds.edge(for: [stopped])?.event, .taskCompleted)
-        XCTAssertTrue(SessionCompletionNotificationPolicy.shouldQueueCompletedNotification(
-            for: stopped, previousPhase: discovered.phase,
-            previousCompletionKey: SessionCompletionKey.make(for: discovered), isEnabled: true
-        ))
-
-        for reply in [nil, "Done.", "Done."] as [String?] {
-            let snapshot = try await processSnapshot(sessionId: sessionId)
-            XCTAssertEqual(SessionCompletionKey.make(for: snapshot), key)
-            XCTAssertNil(sounds.edge(for: [snapshot]))
-
-            let refreshed = try await processStop(reply, sessionId: sessionId)
-            XCTAssertEqual(SessionCompletionKey.make(for: refreshed), key)
-            XCTAssertNil(sounds.edge(for: [refreshed]))
-            XCTAssertFalse(SessionCompletionNotificationPolicy.shouldQueueCompletedNotification(
-                for: refreshed, previousPhase: snapshot.phase, previousCompletionKey: key,
-                isEnabled: true
+            let stopped = try await processStop(nil, sessionId: sessionId)
+            let key = try XCTUnwrap(SessionCompletionKey.make(for: stopped))
+            XCTAssertEqual(sounds.edge(for: [stopped])?.event, .taskCompleted)
+            XCTAssertTrue(SessionCompletionNotificationPolicy.shouldQueueCompletedNotification(
+                for: stopped, previousPhase: discovered.phase,
+                previousCompletionKey: SessionCompletionKey.make(for: discovered), isEnabled: true
             ))
+
+            for reply in [nil, "Done.", "Done."] as [String?] {
+                let snapshot = try await processSnapshot(sessionId: sessionId)
+                XCTAssertEqual(SessionCompletionKey.make(for: snapshot), key)
+                XCTAssertNil(sounds.edge(for: [snapshot]))
+
+                let refreshed = try await processStop(reply, sessionId: sessionId)
+                XCTAssertEqual(SessionCompletionKey.make(for: refreshed), key)
+                XCTAssertNil(sounds.edge(for: [refreshed]))
+                XCTAssertFalse(SessionCompletionNotificationPolicy.shouldQueueCompletedNotification(
+                    for: refreshed, previousPhase: snapshot.phase, previousCompletionKey: key,
+                    isEnabled: true
+                ))
+            }
         }
     }
 
@@ -298,9 +305,9 @@ final class RemoteCodexStopCompletionTests: XCTestCase {
     }
 
     @discardableResult
-    private func processSnapshot(sessionId: String) async throws -> SessionState {
+    private func processSnapshot(sessionId: String, status: String = "idle") async throws -> SessionState {
         try await processHook(
-            "RemoteCodexThreadUpdated", status: "idle", message: "Remote task snapshot", sessionId: sessionId
+            "RemoteCodexThreadUpdated", status: status, message: "Remote task snapshot", sessionId: sessionId
         )
     }
 

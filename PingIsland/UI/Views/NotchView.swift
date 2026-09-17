@@ -1204,14 +1204,8 @@ struct NotchView: View {
     }
 
     private func primeCompletionNotificationTracking(_ instances: [SessionState]) {
-        previousCompletionNotificationStates = Dictionary(
-            uniqueKeysWithValues: instances.map {
-                (
-                    SessionCompletionNotificationPolicy.trackingID(for: $0),
-                    SessionCompletionNotificationPolicy.trackingState(for: $0)
-                )
-            }
-        )
+        previousCompletionNotificationStates =
+            SessionCompletionNotificationPolicy.trackingStates(for: instances)
         synchronizeCompletionNotifications()
     }
 
@@ -1223,25 +1217,12 @@ struct NotchView: View {
                 clearCompletionNotifications(keepPanelOpen: true)
             }
 
-            previousCompletionNotificationStates = Dictionary(
-                uniqueKeysWithValues: instances.map {
-                    (
-                        SessionCompletionNotificationPolicy.trackingID(for: $0),
-                        SessionCompletionNotificationPolicy.trackingState(for: $0)
-                    )
-                }
-            )
+            previousCompletionNotificationStates =
+                SessionCompletionNotificationPolicy.trackingStates(for: instances)
             return
         }
 
-        let currentStates = Dictionary(
-            uniqueKeysWithValues: instances.map {
-                (
-                    SessionCompletionNotificationPolicy.trackingID(for: $0),
-                    SessionCompletionNotificationPolicy.trackingState(for: $0)
-                )
-            }
-        )
+        let currentStates = SessionCompletionNotificationPolicy.trackingStates(for: instances)
 
         let newNotifications = instances
             .compactMap { session -> SessionCompletionNotification? in

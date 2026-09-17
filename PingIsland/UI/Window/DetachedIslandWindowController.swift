@@ -1629,14 +1629,8 @@ final class DetachedIslandWindowController: NSWindowController, NSWindowDelegate
     }
 
     private func primeCompletionNotificationTracking(_ instances: [SessionState]) {
-        previousCompletionNotificationStates = Dictionary(
-            uniqueKeysWithValues: instances.map {
-                (
-                    SessionCompletionNotificationPolicy.trackingID(for: $0),
-                    SessionCompletionNotificationPolicy.trackingState(for: $0)
-                )
-            }
-        )
+        previousCompletionNotificationStates =
+            SessionCompletionNotificationPolicy.trackingStates(for: instances)
         synchronizeCompletionNotifications()
     }
 
@@ -1648,25 +1642,12 @@ final class DetachedIslandWindowController: NSWindowController, NSWindowDelegate
                 clearCompletionNotifications(keepBubbleOpen: false)
             }
 
-            previousCompletionNotificationStates = Dictionary(
-                uniqueKeysWithValues: instances.map {
-                    (
-                        SessionCompletionNotificationPolicy.trackingID(for: $0),
-                        SessionCompletionNotificationPolicy.trackingState(for: $0)
-                    )
-                }
-            )
+            previousCompletionNotificationStates =
+                SessionCompletionNotificationPolicy.trackingStates(for: instances)
             return
         }
 
-        let currentStates = Dictionary(
-            uniqueKeysWithValues: instances.map {
-                (
-                    SessionCompletionNotificationPolicy.trackingID(for: $0),
-                    SessionCompletionNotificationPolicy.trackingState(for: $0)
-                )
-            }
-        )
+        let currentStates = SessionCompletionNotificationPolicy.trackingStates(for: instances)
 
         let newNotifications = instances
             .compactMap { session -> SessionCompletionNotification? in
