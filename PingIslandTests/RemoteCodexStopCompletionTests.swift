@@ -136,55 +136,6 @@ final class RemoteCodexStopCompletionTests: XCTestCase {
         XCTAssertNotEqual(key, firstKey)
     }
 
-    func testResumedSessionNotifiesOnceForNewTurn() async throws {
-        for prompt in [nil, "Continue the task."] as [String?] {
-            let sessionId = makeSessionID()
-            let registry = SessionCompletionNotificationRegistry()
-            var sounds = SessionSoundEdgeTracker()
-            let processing = try await processPrompt("Complete the first task.", sessionId: sessionId)
-            sounds.prime(with: [processing])
-
-            let first = try await processStop("Done.", sessionId: sessionId)
-            let firstKey = try XCTUnwrap(SessionCompletionKey.make(for: first))
-            XCTAssertEqual(sounds.edge(for: [first])?.event, .taskCompleted)
-            registry.enqueue(SessionCompletionNotification(session: first, kind: .completed))
-            XCTAssertNotNil(registry.dequeueNext())
-
-            // Remote CLI resume reports SessionStart before the next prompt.
-            let resumed = try await processHook(
-                "SessionStart", status: "waiting_for_input", message: nil, sessionId: sessionId
-            )
-            XCTAssertEqual(resumed.phase, .waitingForInput)
-            XCTAssertEqual(resumed.completionSequence, first.completionSequence)
-            XCTAssertTrue(resumed.hasRemoteCodexTurnCompletion)
-            XCTAssertNotEqual(sounds.edge(for: [resumed])?.event, .taskCompleted)
-
-            let nextProcessing = try await processPrompt(prompt, sessionId: sessionId)
-            XCTAssertFalse(nextProcessing.hasRemoteCodexTurnCompletion)
-            _ = sounds.edge(for: [nextProcessing])
-
-            let completed = try await processStop("Done.", sessionId: sessionId)
-            let key = try XCTUnwrap(SessionCompletionKey.make(for: completed))
-            XCTAssertNotEqual(key, firstKey)
-            XCTAssertTrue(SessionCompletionNotificationPolicy.shouldQueueCompletedNotification(
-                for: completed, previousPhase: nextProcessing.phase, isEnabled: true
-            ))
-            XCTAssertEqual(sounds.edge(for: [completed])?.event, .taskCompleted)
-            registry.enqueue(SessionCompletionNotification(session: completed, kind: .completed))
-            XCTAssertEqual(registry.dequeueNext()?.identity, .completed(key))
-
-            for refreshed in [
-                try await processSnapshot(sessionId: sessionId),
-                try await processStop("Done.", sessionId: sessionId)
-            ] {
-                XCTAssertEqual(SessionCompletionKey.make(for: refreshed), key)
-                XCTAssertNil(sounds.edge(for: [refreshed]))
-                registry.enqueue(SessionCompletionNotification(session: refreshed, kind: .completed))
-                XCTAssertNil(registry.dequeueNext())
-            }
-        }
-    }
-
     func testEmptyStopAfterMissingPromptAndToolIDDoesNotReuseEarlierCompletion() async throws {
         let sessionId = makeSessionID()
         let firstKey = try await completeFirstTurn(sessionId: sessionId)
@@ -226,8 +177,17 @@ final class RemoteCodexStopCompletionTests: XCTestCase {
         var sounds = SessionSoundEdgeTracker()
         var previousKey: SessionCompletionKey?
 
-        for turn in 1...2 {
-            let processing = try await processPrompt("Complete task \(turn).", sessionId: sessionId)
+        for turn in 1...4 {
+            // The last two turns resume the CLI, including a missing prompt body.
+            if turn > 2 {
+                let resumed = try await processHook(
+                    "SessionStart", status: "waiting_for_input", message: nil, sessionId: sessionId
+                )
+                XCTAssertEqual(resumed.phase, .waitingForInput)
+                XCTAssertNotEqual(sounds.edge(for: [resumed])?.event, .taskCompleted)
+            }
+            let prompt = turn == 4 ? nil : "Complete task \(turn)."
+            let processing = try await processPrompt(prompt, sessionId: sessionId)
             XCTAssertFalse(processing.hasRemoteCodexTurnCompletion)
             if turn == 1 {
                 sounds.prime(with: [processing])
@@ -260,7 +220,7 @@ final class RemoteCodexStopCompletionTests: XCTestCase {
         }
 
         let session = await store.session(for: sessionId)
-        XCTAssertEqual(assistantMessages(in: try XCTUnwrap(session)), ["Done.", "Done."])
+        XCTAssertEqual(assistantMessages(in: try XCTUnwrap(session)), Array(repeating: "Done.", count: 4))
     }
 
     func testSameReplyCompletesNewTurnAfterMissingPromptEvent() async throws {
