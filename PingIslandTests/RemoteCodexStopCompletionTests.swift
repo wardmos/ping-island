@@ -112,7 +112,7 @@ final class RemoteCodexStopCompletionTests: XCTestCase {
         }
     }
 
-    func testMissingPromptDoesNotPairEarlierQuestionWithNewReply() async throws {
+    func testMissingPromptBodyDoesNotPairEarlierQuestionWithNewReply() async throws {
         for prompt in [nil, "", " \n\t"] as [String?] {
             let sessionId = makeSessionID()
             try await processPrompt("Question A", sessionId: sessionId)
@@ -250,6 +250,72 @@ final class RemoteCodexStopCompletionTests: XCTestCase {
         let replayed = try await processStop("Done.", sessionId: sessionId)
         XCTAssertEqual(assistantMessages(in: replayed), ["Done.", "Done."])
         XCTAssertEqual(SessionCompletionKey.make(for: replayed), key)
+    }
+
+    func testToolActivityAfterResumeStartsNewTurnWithoutPromptEvent() async throws {
+        let sessionId = makeSessionID()
+        let registry = SessionCompletionNotificationRegistry()
+        var sounds = SessionSoundEdgeTracker()
+        let prompt = try await processPrompt("First question.", sessionId: sessionId)
+        sounds.prime(with: [prompt])
+        let first = try await processStop("First reply.", sessionId: sessionId)
+        let firstKey = try XCTUnwrap(SessionCompletionKey.make(for: first))
+        XCTAssertEqual(sounds.edge(for: [first])?.event, .taskCompleted)
+        registry.enqueue(SessionCompletionNotification(session: first, kind: .completed))
+        XCTAssertEqual(registry.dequeueNext()?.identity, .completed(firstKey))
+
+        let resumed = try await processHook(
+            "SessionStart", status: "waiting_for_input", message: nil, sessionId: sessionId
+        )
+        let snapshot = try await processSnapshot(sessionId: sessionId, status: "processing")
+        for session in [resumed, snapshot] {
+            XCTAssertEqual(session.phase, .waitingForInput)
+            XCTAssertEqual(session.completionSequence, first.completionSequence)
+            XCTAssertNil(SessionCompletionKey.make(for: session))
+            XCTAssertNotEqual(sounds.edge(for: [session])?.event, .taskCompleted)
+        }
+
+        // The entire UserPromptSubmit event is missing after resume.
+        for (event, status) in [("PreToolUse", "running_tool"), ("PostToolUse", "processing")] {
+            let active = try await processHook(
+                event, status: status, message: nil, sessionId: sessionId,
+                tool: "shell", toolUseId: "remote-tool-\(sessionId)"
+            )
+            XCTAssertEqual(active.phase, .processing)
+            XCTAssertEqual(active.completionSequence, first.completionSequence + 1)
+            XCTAssertFalse(active.hasRemoteCodexTurnCompletion)
+            XCTAssertNil(active.previewText)
+            XCTAssertNil(active.lastMessage)
+            XCTAssertNil(SessionCompletionPreviewBuilder.latestUserText(for: active))
+            XCTAssertNil(SessionCompletionPreviewBuilder.latestAssistantText(for: active))
+            XCTAssertNotEqual(sounds.edge(for: [active])?.event, .taskCompleted)
+        }
+
+        let stopped = try await processStop("Second reply.", sessionId: sessionId)
+        let key = try XCTUnwrap(SessionCompletionKey.make(for: stopped))
+        XCTAssertNotEqual(key, firstKey)
+        XCTAssertNil(SessionCompletionPreviewBuilder.latestUserText(for: stopped))
+        XCTAssertEqual(SessionCompletionPreviewBuilder.latestAssistantText(for: stopped), "Second reply.")
+        XCTAssertTrue(SessionCompletionNotificationPolicy.shouldQueueCompletedNotification(
+            for: stopped, previousPhase: .processing, isEnabled: true
+        ))
+        XCTAssertEqual(sounds.edge(for: [stopped])?.event, .taskCompleted)
+        registry.enqueue(SessionCompletionNotification(session: stopped, kind: .completed))
+        XCTAssertEqual(registry.dequeueNext()?.identity, .completed(key))
+
+        for reply in [nil, "Second reply.", "Late reply."] as [String?] {
+            let snapshot = try await processSnapshot(sessionId: sessionId, status: "processing")
+            let refreshed = try await processStop(reply, sessionId: sessionId)
+            for session in [snapshot, refreshed] {
+                XCTAssertEqual(SessionCompletionKey.make(for: session), key)
+                XCTAssertFalse(SessionCompletionNotificationPolicy.shouldQueueCompletedNotification(
+                    for: session, previousPhase: .idle, previousCompletionKey: key, isEnabled: true
+                ))
+                XCTAssertNil(sounds.edge(for: [session]))
+                registry.enqueue(SessionCompletionNotification(session: session, kind: .completed))
+                XCTAssertNil(registry.dequeueNext())
+            }
+        }
     }
 
     func testConversationPreservesFormattingWithoutInjectedReminders() async throws {

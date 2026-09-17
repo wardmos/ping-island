@@ -612,10 +612,10 @@ actor SessionStore {
             ? session.phase
             : inferredPhase
         // Remote CLI resume moves a completed session to waitingForInput.
-        // Its retained Stop still marks the boundary when the next prompt arrives.
+        // Its retained Stop marks the boundary for the next prompt or tool activity.
         let startsNextRemoteCodexTurn = event.provider == .codex
             && event.ingress == .remoteBridge
-            && event.event == "UserPromptSubmit"
+            && (event.event == "UserPromptSubmit" || event.isToolEvent)
             && session.hasRemoteCodexTurnCompletion
         if wasCompletedReady || startsNextRemoteCodexTurn, newPhase == .processing {
             session.completionSequence &+= 1
