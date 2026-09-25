@@ -495,6 +495,12 @@ public enum HookPayloadMapper {
         terminalContext: TerminalContext,
         intervention: InterventionRequest?
     ) -> SessionStatus? {
+        if provider == .codex,
+           eventType == "SessionStart",
+           (payload["source"] as? String) == "compact" {
+            return SessionStatus(kind: .active)
+        }
+
         if let text = payload["status"] as? String {
             if hasAnsweredQuestionPayload(payload, provider: provider) {
                 return answeredQuestionStatus(eventType: eventType)

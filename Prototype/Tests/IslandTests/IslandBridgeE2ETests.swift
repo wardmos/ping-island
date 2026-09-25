@@ -501,6 +501,56 @@ func remoteAgentFailsOpenWhenNoControlClientIsAttached() async throws {
     #expect(response.reason == nil)
 }
 
+@Test
+func remoteAgentForwardsCodexCompactSessionStartSource() async throws {
+    let executable = try TestRuntime.executableURL(named: "PingIslandBridge")
+    let socketID = UUID().uuidString.prefix(8)
+    let hookSocketPath = "/tmp/pi-\(socketID)-h.sock"
+    let controlSocketPath = "/tmp/pi-\(socketID)-c.sock"
+    let service = try RunningProcess(
+        executableURL: executable,
+        arguments: [
+            "--mode", "remote-agent-service",
+            "--hook-socket", hookSocketPath,
+            "--control-socket", controlSocketPath
+        ]
+    )
+    defer {
+        service.terminate()
+        _ = service.waitForExit()
+        try? FileManager.default.removeItem(atPath: hookSocketPath)
+        try? FileManager.default.removeItem(atPath: controlSocketPath)
+    }
+
+    try await waitUntil(description: "remote agent service should create sockets") {
+        FileManager.default.fileExists(atPath: hookSocketPath)
+            && FileManager.default.fileExists(atPath: controlSocketPath)
+    }
+
+    _ = try TestSocketClient.send(
+        envelope: BridgeEnvelope(
+            provider: .codex,
+            eventType: "SessionStart",
+            sessionKey: "codex:remote-compact-session",
+            cwd: "/work/project",
+            status: SessionStatus(kind: .active),
+            metadata: [
+                "session_id": "remote-compact-session",
+                "source": "compact"
+            ]
+        ),
+        socketPath: hookSocketPath
+    )
+
+    let event = try await readRemoteHookEvent(
+        controlSocketPath: controlSocketPath,
+        matching: { $0.payload.sessionID == "remote-compact-session" }
+    )
+
+    #expect(event.payload.event == "SessionStart")
+    #expect(event.payload.sessionStartSource == "compact")
+}
+
 @Test(arguments: ["task_started", "task_complete"])
 func remoteAgentForwardsCodexAppServerStateUpdates(latestLifecycleEvent: String) async throws {
     try await withTemporaryDirectory { directory in
@@ -995,11 +1045,13 @@ private struct TestRemoteHookEventPayload: Decodable {
     let requestID: UUID
     let sessionID: String
     let cwd: String
+    let event: String
     let status: String
     let provider: String
     let permissionMode: String?
     let message: String?
     let approvalsReviewer: String?
+    let sessionStartSource: String?
     let clientInfo: TestRemoteHookClientInfoPayload
 }
 

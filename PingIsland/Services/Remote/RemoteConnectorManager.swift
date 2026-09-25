@@ -886,6 +886,7 @@ final class RemoteConnectorManager: ObservableObject {
                 message: payload.message,
                 ingress: .remoteBridge,
                 bridgeExpectsResponse: payload.expectsResponse,
+                sessionStartSource: payload.sessionStartSource,
                 codexBypassPermissions: Self.isRemoteCodexBypassPermissionRequest(
                     provider: payload.provider, eventType: payload.event, permissionMode: payload.permissionMode
                 )
